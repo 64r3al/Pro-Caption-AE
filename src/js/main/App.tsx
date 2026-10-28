@@ -84,6 +84,7 @@ export const AppContent = () => {
   const [activeWords, setActiveWords] = useState<TranscriptWord[]>(SAMPLE_TRANSCRIPT);
   const [hasTranscript, setHasTranscript] = useState(false);
   const [isTranscriptEdited, setIsTranscriptEdited] = useState(false);
+  const [transcriptRevision, setTranscriptRevision] = useState(0);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const jobRef = useRef<TranscriptionJob | null>(null);
   // Audio the current transcript came from, kept for onset refinement at build time.
@@ -489,6 +490,7 @@ export const AppContent = () => {
       transcribedLayer.current = info;
       setActiveWords(transcript.words);
       setTranscriptLanguage(transcript.language || "");
+      setTranscriptRevision((revision) => revision + 1);
       setActiveWordIndex(0);
       setScrubberPos(0);
       setHasTranscript(true);
@@ -1211,6 +1213,7 @@ export const AppContent = () => {
                 Click a word to correct its text or timing, remove an unwanted word, or insert a missing word. Edits are used for both After Effects generation and exports.
               </p>
               <TranscriptEditor
+                key={transcriptRevision}
                 words={hasTranscript ? activeWords : []}
                 activeWordIndex={activeWordIndex}
                 disabled={isTranscribing || isBuilding}
