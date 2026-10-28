@@ -41,6 +41,7 @@ import { loadCustomPresets, persistCustomPresets } from "../lib/services/customP
 import { syncWords } from "../../shared/sync";
 import { buildGroups } from "../../shared/captions";
 import { formatSubtitles, type SubtitleFormat } from "../../shared/subtitles";
+import { getPresetRenderSupport } from "../../shared/presetCapabilities";
 import { displayName, version } from "../../shared/shared";
 import "./app.scss";
 
@@ -882,6 +883,7 @@ export const AppContent = () => {
               <div className="grid grid-cols-1 gap-space-sm pt-space-xs max-h-[65vh] overflow-y-auto pr-1">
                 {tabFilteredPresets.map((preset) => {
                   const isSelected = selectedPresetId === preset.id;
+                  const renderSupport = getPresetRenderSupport(preset.animMode);
                   return (
                     <div
                       key={preset.id}
@@ -910,6 +912,12 @@ export const AppContent = () => {
                           <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5 text-[11px] leading-tight">
                             {preset.whatItLooksLike} • {preset.description}
                           </p>
+                          <span
+                            title={renderSupport.description}
+                            className={`mt-1 self-start font-label-xs text-[8px] px-1.5 py-0.5 rounded font-mono ${renderSupport.level === "native-shape" ? "bg-secondary/15 text-secondary" : renderSupport.level === "native-motion" ? "bg-primary/15 text-primary" : "bg-error/10 text-error"}`}
+                          >
+                            {renderSupport.label}
+                          </span>
                         </div>
 
                         <div className="shrink-0 flex items-center justify-end">
