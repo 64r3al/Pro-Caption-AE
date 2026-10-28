@@ -77,6 +77,7 @@ export const AppContent = () => {
   // so the sample is never built into the user's comp.
   const [activeWords, setActiveWords] = useState<TranscriptWord[]>(SAMPLE_TRANSCRIPT);
   const [hasTranscript, setHasTranscript] = useState(false);
+  const [isTranscriptEdited, setIsTranscriptEdited] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const jobRef = useRef<TranscriptionJob | null>(null);
   // Audio the current transcript came from, kept for onset refinement at build time.
@@ -93,11 +94,12 @@ export const AppContent = () => {
   const [currentFrame, setCurrentFrame] = useState(1);
   const [waveformHeights, setWaveformHeights] = useState<number[] | null>(null);
   const [waveformStatus, setWaveformStatus] = useState("Select an audio layer to analyze its waveform.");
+  const previewInfo = hasTranscript && transcribedLayer.current ? transcribedLayer.current : selection;
   const fallbackPreviewDuration = 42.5;
   const previewDuration =
-    selection?.compDuration && selection.compDuration > 0 ? selection.compDuration : fallbackPreviewDuration;
+    previewInfo?.compDuration && previewInfo.compDuration > 0 ? previewInfo.compDuration : fallbackPreviewDuration;
   const previewFps =
-    selection?.compFrameRate && selection.compFrameRate > 0 ? selection.compFrameRate : 30;
+    previewInfo?.compFrameRate && previewInfo.compFrameRate > 0 ? previewInfo.compFrameRate : 30;
   const totalFrames = Math.max(1, Math.round(previewDuration * previewFps));
 
   // Live Preview Canvas state
@@ -232,7 +234,7 @@ export const AppContent = () => {
   }, [scrubberPos, activeWords, hasTranscript, previewDuration, previewFps, totalFrames]);
 
   useEffect(() => {
-    const info = selection;
+    const info = hasTranscript && transcribedLayer.current ? transcribedLayer.current : selection;
     if (!info) {
       setWaveformHeights(null);
       setWaveformStatus("Select an audio layer to analyze its waveform.");
@@ -269,7 +271,12 @@ export const AppContent = () => {
     return () => {
       cancelled = true;
     };
-  }, [selection?.sourceFilePath, selection?.sourceInSeconds, selection?.sourceDurationSeconds]);
+  }, [
+    selection?.sourceFilePath,
+    selection?.sourceInSeconds,
+    selection?.sourceDurationSeconds,
+    hasTranscript,
+  ]);
 
   // Handle Preset selection
   const applyPreset = (preset: ViralPreset) => {
@@ -349,7 +356,6 @@ export const AppContent = () => {
       return;
     }
 
-    releaseTranscriptAudio();
     setIsTranscribing(true);
     const job = transcribeSelection(
       info,
@@ -359,13 +365,22 @@ export const AppContent = () => {
     jobRef.current = job;
     try {
       const { transcript, audioPath, isTempAudio } = await job.promise;
+      if (!transcript.words.length) {
+        if (audioPath && isTempAudio) removeTempFile(audioPath);
+        throw new Error("Groq returned no words for this audio.");
+      }
+
+      const previousAudio = transcriptAudio.current;
+      if (previousAudio.path && previousAudio.isTemp && previousAudio.path !== audioPath) {
+        removeTempFile(previousAudio.path);
+      }
       transcriptAudio.current = { path: audioPath, isTemp: isTempAudio };
-      if (!transcript.words.length) throw new Error("Groq returned no words for this audio.");
       transcribedLayer.current = info;
       setActiveWords(transcript.words);
       setActiveWordIndex(0);
       setScrubberPos(0);
       setHasTranscript(true);
+      setIsTranscriptEdited(false);
       setTranscribeStatus(`Done: ${transcript.words.length} words.`);
       showToast({
         title: "Transcription Complete",
@@ -397,7 +412,9 @@ export const AppContent = () => {
 
     setIsBuilding(true);
     try {
-      const words = autoSnapOnsets
+      // Manual timing corrections are authoritative. Automatic onset refinement is applied only
+      // to untouched transcription results, never over the user's edits.
+      const words = autoSnapOnsets && !isTranscriptEdited
         ? await refineWordTiming(activeWords, transcriptAudio.current.path)
         : activeWords;
 
@@ -450,7 +467,7 @@ export const AppContent = () => {
       const result = (await evalTS("buildCaptions", info.compId, groups, style)) as BuildCaptionsResult;
       showToast({
         title: "Built in After Effects",
-        description: `${result.captions} captions, ${result.words} words, in "${result.precompName}".`,
+        description: `${result.captions} captions, ${result.words} words, in "${result.precompName}".${isTranscriptEdited && autoSnapOnsets ? " Manual edits were preserved; auto-snap was skipped." : ""}`,
         variant: "success",
       });
     } catch (err: any) {
@@ -1055,6 +1072,7 @@ export const AppContent = () => {
                 onChange={(words) => {
                   setActiveWords(words);
                   setHasTranscript(words.length > 0);
+                  setIsTranscriptEdited(true);
                   setActiveWordIndex((index) => Math.max(0, Math.min(index, Math.max(0, words.length - 1))));
                 }}
               />
@@ -1879,6 +1897,11 @@ export const AppContent = () => {
                     <div className="w-7 h-4 bg-surface-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-primary after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
                   </div>
                 </label>
+                {isTranscriptEdited && autoSnapOnsets && (
+                  <p className="px-space-sm text-[10px] text-on-surface-variant">
+                    Auto-snap will be skipped for this edited transcript so your manual word timings stay intact.
+                  </p>
+                )}
 
                 <label className="flex items-center justify-between bg-surface-container-lowest px-space-sm py-1.5 rounded cursor-pointer group">
                   <div className="flex items-center gap-space-xs min-w-0">
