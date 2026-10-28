@@ -42,6 +42,7 @@ import { syncWords } from "../../shared/sync";
 import { buildGroups } from "../../shared/captions";
 import { formatSubtitles, type SubtitleFormat } from "../../shared/subtitles";
 import { getPresetRenderSupport } from "../../shared/presetCapabilities";
+import { isArabicLanguage } from "../../shared/languages";
 import { displayName, version } from "../../shared/shared";
 import "./app.scss";
 
@@ -70,6 +71,7 @@ export const AppContent = () => {
   // Groq Speech Engine Settings
   const [model, setModel] = useState<GroqModel>("whisper-large-v3-turbo");
   const [language, setLanguage] = useState("");
+  const [transcriptLanguage, setTranscriptLanguage] = useState("");
   const [glossary, setGlossary] = useState<string[]>([]);
   const [newGlossaryTag, setNewGlossaryTag] = useState("");
   const [isAddingTag, setIsAddingTag] = useState(false);
@@ -486,6 +488,7 @@ export const AppContent = () => {
       transcriptAudio.current = { path: audioPath, isTemp: isTempAudio };
       transcribedLayer.current = info;
       setActiveWords(transcript.words);
+      setTranscriptLanguage(transcript.language || "");
       setActiveWordIndex(0);
       setScrubberPos(0);
       setHasTranscript(true);
@@ -550,7 +553,7 @@ export const AppContent = () => {
         flickerGapSeconds: DEFAULT_GROUPING_OPTIONS.flickerGapSeconds,
         fps: info.compFrameRate,
         compDuration: info.compDuration,
-        uppercase: true,
+        uppercase: !isArabicLanguage(language || transcriptLanguage),
       });
       if (!groups.length) throw new Error("No words fall inside the layer's in/out range.");
 
@@ -637,7 +640,7 @@ export const AppContent = () => {
           formatVersion: 1,
           sourceLayer: info.layerName,
           composition: info.compName,
-          language: language || "auto",
+          language: language || transcriptLanguage || "auto",
           timebase: "audio-relative-seconds",
           words: activeWords,
         }, null, 2) + "\n";
