@@ -1,8 +1,8 @@
 import { crypto, fs, https } from "../cep/node";
 import { assertNodeAvailable } from "./env";
 import { GROQ_TRANSCRIPTION_URL } from "../../../shared/constants";
-import type { GroqModel, TranscriptResult, TranscriptWord } from "../../../shared/types";
-import { validateTranscriptWords } from "../../../shared/transcriptValidation";
+import type { GroqModel, TranscriptResult } from "../../../shared/types";
+import { normalizeTranscriptWords } from "../../../shared/transcriptValidation";
 
 // We build the multipart/form-data body by hand instead of pulling in the npm `form-data`
 // package the master prompt's reference snippet uses: CEP's Node module resolution only sees
@@ -49,37 +49,7 @@ const buildMultipartBody = (
 
 // Groq verbose_json -> flat word list. Falls back to spreading words evenly across each
 // segment when word-level timestamps aren't returned (ported from the ScriptUI prototype).
-const normalizeWords = (resp: any): TranscriptWord[] => {
-  if (resp?.words?.length) {
-    const wordLevel = validateTranscriptWords(
-      resp.words.map((w: any) => ({
-        text: String(w?.word ?? ""),
-        start: Number(w?.start),
-        end: Number(w?.end),
-      }))
-    );
-    if (wordLevel.length) return wordLevel;
-  }
 
-  const fallback: TranscriptWord[] = [];
-  if (resp?.segments) {
-    for (const segment of resp.segments) {
-      const parts = String(segment?.text ?? "").trim().split(/\s+/).filter(Boolean);
-      const start = Number(segment?.start);
-      const end = Number(segment?.end);
-      if (!parts.length || !Number.isFinite(start) || !Number.isFinite(end) || end < start) continue;
-      const durationPerWord = (end - start) / parts.length;
-      parts.forEach((text: string, index: number) => {
-        fallback.push({
-          text,
-          start: start + durationPerWord * index,
-          end: start + durationPerWord * (index + 1),
-        });
-      });
-    }
-  }
-  return validateTranscriptWords(fallback);
-};
 
 export interface TranscribeOptions {
   apiKey: string;
@@ -257,7 +227,7 @@ export const transcribe = (filePath: string, opts: TranscribeOptions): Transcrib
         text: parsed.text || "",
         language: parsed.language,
         duration: parsed.duration,
-        words: normalizeWords(parsed),
+        words: normalizeTranscriptWords(parsed),
         segments: parsed.segments || [],
       };
     }
