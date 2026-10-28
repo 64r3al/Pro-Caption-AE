@@ -1218,11 +1218,14 @@ export const AppContent = () => {
                 activeWordIndex={activeWordIndex}
                 disabled={isTranscribing || isBuilding}
                 onSelectWord={seekToWord}
-                onChange={(words) => {
+                onChange={(words, focusIndex) => {
                   setActiveWords(words);
                   setHasTranscript(words.length > 0);
                   setIsTranscriptEdited(true);
-                  setActiveWordIndex((index) => Math.max(0, Math.min(index, Math.max(0, words.length - 1))));
+                  setActiveWordIndex((index) => {
+                    const preferred = focusIndex === undefined ? index : focusIndex;
+                    return Math.max(0, Math.min(preferred, Math.max(0, words.length - 1)));
+                  });
                 }}
               />
             </section>
