@@ -98,6 +98,11 @@ export const AppContent = () => {
   const [waveformHeights, setWaveformHeights] = useState<number[] | null>(null);
   const [waveformStatus, setWaveformStatus] = useState("Select an audio layer to analyze its waveform.");
   const previewInfo = hasTranscript && transcribedLayer.current ? transcribedLayer.current : selection;
+  const fallbackPreviewDuration = 42.5;
+  const previewDuration =
+    previewInfo?.compDuration && previewInfo.compDuration > 0 ? previewInfo.compDuration : fallbackPreviewDuration;
+  const previewFps =
+    previewInfo?.compFrameRate && previewInfo.compFrameRate > 0 ? previewInfo.compFrameRate : 30;
   const waveformInfo = hasTranscript && transcribedLayer.current ? transcribedLayer.current : selection;
   const waveformClipLeft = waveformInfo && previewDuration > 0
     ? Math.max(0, Math.min(100, (waveformInfo.inPoint / previewDuration) * 100))
@@ -105,11 +110,6 @@ export const AppContent = () => {
   const waveformClipWidth = waveformInfo && previewDuration > 0
     ? Math.max(0, Math.min(100 - waveformClipLeft, ((waveformInfo.outPoint - waveformInfo.inPoint) / previewDuration) * 100))
     : 100;
-  const fallbackPreviewDuration = 42.5;
-  const previewDuration =
-    previewInfo?.compDuration && previewInfo.compDuration > 0 ? previewInfo.compDuration : fallbackPreviewDuration;
-  const previewFps =
-    previewInfo?.compFrameRate && previewInfo.compFrameRate > 0 ? previewInfo.compFrameRate : 30;
   const totalFrames = Math.max(1, Math.round(previewDuration * previewFps));
 
   // Live Preview Canvas state
