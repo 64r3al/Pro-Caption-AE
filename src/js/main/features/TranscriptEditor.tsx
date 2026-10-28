@@ -128,8 +128,13 @@ export const TranscriptEditor = ({
     }
     const insertAt = selectedIndex == null ? words.length : selectedIndex + 1;
     const previous = insertAt > 0 ? words[insertAt - 1] : null;
-    const start = previous ? previous.end : 0;
-    const end = start + 0.2;
+    const next = insertAt < words.length ? words[insertAt] : null;
+    const start = previous && next
+      ? previous.start + Math.max(0, next.start - previous.start) / 2
+      : previous
+        ? previous.end
+        : 0;
+    const end = next ? Math.max(start, next.start) : start + 0.2;
     const nextWords = [
       ...words.slice(0, insertAt),
       { text, start, end },
@@ -183,7 +188,7 @@ export const TranscriptEditor = ({
       <div className="gc-transcript-tools">
         <div className="gc-transcript-tools-heading">
           <strong>{selectedIndex == null ? "Edit a word" : `Selected word · ${selectedIndex + 1} of ${words.length}`}</strong>
-          <span>Times are relative to the audio sent for transcription.</span>
+          <span>Times are relative to the selected layer's audio range.</span>
         </div>
 
         {selectedIndex != null && words[selectedIndex] && (
