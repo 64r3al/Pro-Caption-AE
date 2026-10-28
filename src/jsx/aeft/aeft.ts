@@ -458,7 +458,7 @@ export const buildCaptions = (
   if (!groups.length) {
     throw new Error("No words to build captions from.");
   }
-  if (!style || typeof style.font !== "string" || !style.font.trim()) {
+  if (!style || typeof style.font !== "string" || !style.font.replace(/^\s+|\s+$/g, "")) {
     throw new Error("Choose a valid font before building captions.");
   }
   if (!isFinite(style.size) || style.size <= 0) {
@@ -479,7 +479,7 @@ export const buildCaptions = (
   let wordCount = 0;
   for (let i = 0; i < groups.length; i++) {
     const group = groups[i];
-    if (!group || !group.words || !group.words.length || typeof group.text !== "string" || !group.text.trim()) {
+    if (!group || !group.words || !group.words.length || typeof group.text !== "string" || !group.text.replace(/^\s+|\s+$/g, "")) {
       throw new Error("Caption group " + (i + 1) + " has no usable text.");
     }
     if (
@@ -496,7 +496,7 @@ export const buildCaptions = (
       if (
         !word ||
         typeof word.text !== "string" ||
-        !word.text.trim() ||
+        !word.text.replace(/^\s+|\s+$/g, "") ||
         !isFinite(word.start) ||
         !isFinite(word.end) ||
         word.start < 0 ||
