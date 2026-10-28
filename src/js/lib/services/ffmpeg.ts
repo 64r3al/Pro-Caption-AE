@@ -1,4 +1,5 @@
 import { child_process, fs, os, path } from "../cep/node";
+import { compressWaveformSamples } from "../../../shared/waveform";
 import { assertNodeAvailable } from "./env";
 import { getStoredFfmpegPath, setStoredFfmpegPath } from "./settingsStore";
 
@@ -150,4 +151,79 @@ export const removeTempFile = (filePath: string): void => {
   } catch {
     // best-effort cleanup only
   }
+};
+
+
+/**
+ * Reads a low-rate mono PCM stream from FFmpeg and reduces it to a small set of real
+ * peak bars. The output is bounded so a long source does not require an unbounded buffer.
+ */
+export const extractWaveformPeaks = (
+  ffmpegPath: string,
+  sourcePath: string,
+  startSeconds: number,
+  durationSeconds: number,
+  barCount = 64
+): Promise<number[]> => {
+  assertNodeAvailable();
+  if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
+    return Promise.reject(new Error("FFmpeg was not found. Locate ffmpeg in Settings to analyze the audio waveform."));
+  }
+  if (!sourcePath || !fs.existsSync(sourcePath)) {
+    return Promise.reject(new Error("The selected source media could not be found."));
+  }
+  if (
+    !Number.isFinite(startSeconds) ||
+    !Number.isFinite(durationSeconds) ||
+    startSeconds < 0 ||
+    durationSeconds <= 0
+  ) {
+    return Promise.reject(new Error("The selected audio range is invalid."));
+  }
+
+  const args = [
+    "-hide_banner",
+    "-loglevel", "error",
+    "-ss", startSeconds.toFixed(3),
+    "-t", durationSeconds.toFixed(3),
+    "-i", sourcePath,
+    "-vn",
+    "-ac", "1",
+    "-ar", "200",
+    "-f", "s16le",
+    "pipe:1",
+  ];
+
+  return new Promise((resolve, reject) => {
+    child_process.execFile(
+      ffmpegPath,
+      args,
+      { encoding: "buffer", timeout: 120_000, maxBuffer: 64 * 1024 * 1024 },
+      (err: Error | null, stdout: Buffer | string, stderr: Buffer | string) => {
+        if (err) {
+          const details = Buffer.isBuffer(stderr) ? stderr.toString("utf8") : String(stderr || "");
+          reject(new Error("Could not analyze the selected audio waveform. " + (details || err.message)));
+          return;
+        }
+
+        const pcm = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout || "");
+        const sampleCount = Math.floor(pcm.length / 2);
+        if (!sampleCount) {
+          reject(new Error("FFmpeg returned no audio samples for the selected layer."));
+          return;
+        }
+
+        const samples = new Array<number>(sampleCount);
+        for (let index = 0; index < sampleCount; index++) {
+          samples[index] = pcm.readInt16LE(index * 2) / 32768;
+        }
+        const peaks = compressWaveformSamples(samples, barCount);
+        if (!peaks.length) {
+          reject(new Error("A usable waveform could not be generated from this audio."));
+          return;
+        }
+        resolve(peaks);
+      }
+    );
+  });
 };

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { evalTS } from "../lib/utils/bolt";
 import { resolveApiKey } from "../lib/services/apiKey";
-import { removeTempFile } from "../lib/services/ffmpeg";
+import { extractWaveformPeaks, findFfmpeg, removeTempFile } from "../lib/services/ffmpeg";
 import { refineWordTiming, transcribeSelection, type TranscriptionJob } from "../lib/services/pipeline";
 import { SettingsTab } from "./components/SettingsTab";
 import { ToastProvider, useToast } from "./ui/Toast";
@@ -35,8 +35,11 @@ import {
 } from "../lib/services/fonts";
 import { FontPicker } from "./features/FontPicker";
 import { PresetLibraryModal } from "./features/PresetLibraryModal";
+import { TranscriptEditor } from "./features/TranscriptEditor";
+import { writeExportFile } from "../lib/services/export";
 import { syncWords } from "../../shared/sync";
 import { buildGroups } from "../../shared/captions";
+import { formatSubtitles, type SubtitleFormat } from "../../shared/subtitles";
 import { displayName, version } from "../../shared/shared";
 import "./app.scss";
 
@@ -83,13 +86,19 @@ export const AppContent = () => {
   const transcribedLayer = useRef<SelectedAudioLayerInfo | null>(null);
 
   // Waveform state
-  const [scrubberPos, setScrubberPos] = useState(34); // %
+  const [scrubberPos, setScrubberPos] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
-  const [activeWordIndex, setActiveWordIndex] = useState(1); // 'VIRAL'
-  const [currentFrame, setCurrentFrame] = useState(426);
-  const totalFrames = 1275;
-  const compDuration = 42.5;
+  const [activeWordIndex, setActiveWordIndex] = useState(0);
+  const [currentFrame, setCurrentFrame] = useState(1);
+  const [waveformHeights, setWaveformHeights] = useState<number[] | null>(null);
+  const [waveformStatus, setWaveformStatus] = useState("Select an audio layer to analyze its waveform.");
+  const fallbackPreviewDuration = 42.5;
+  const previewDuration =
+    selection?.compDuration && selection.compDuration > 0 ? selection.compDuration : fallbackPreviewDuration;
+  const previewFps =
+    selection?.compFrameRate && selection.compFrameRate > 0 ? selection.compFrameRate : 30;
+  const totalFrames = Math.max(1, Math.round(previewDuration * previewFps));
 
   // Live Preview Canvas state
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("9:16");
@@ -179,17 +188,88 @@ export const AppContent = () => {
     };
   }, []);
 
-  // Playback loop for live preview (Automatic, Real-Time Synchronized)
+  // The playhead advances in real time. When a transcript exists, its active word follows
+  // the selected layer's actual source-to-composition time mapping.
   useEffect(() => {
-    if (!isPlaying) return;
-    const intervalMs = Math.round(520 / playbackSpeed);
+    if (!isPlaying || previewDuration <= 0) return;
+    const intervalMs = 100;
+    const increment = (intervalMs * playbackSpeed * 100) / (1000 * previewDuration);
     const interval = window.setInterval(() => {
-      setActiveWordIndex((prev) => (prev + 1) % activeWords.length);
-      setCurrentFrame((prev) => (prev >= totalFrames ? 1 : prev + 15));
-      setScrubberPos((prev) => (prev >= 98 ? 2 : prev + 2));
+      setScrubberPos((previous) => {
+        const next = previous + increment;
+        return next >= 100 ? 0 : next;
+      });
     }, intervalMs);
     return () => window.clearInterval(interval);
-  }, [isPlaying, activeWords.length, playbackSpeed]);
+  }, [isPlaying, playbackSpeed, previewDuration]);
+
+  // Keep the sample preview lively before the first transcription; real transcripts are
+  // instead driven by the playhead timing below.
+  useEffect(() => {
+    if (!isPlaying || hasTranscript || !activeWords.length) return;
+    const interval = window.setInterval(() => {
+      setActiveWordIndex((previous) => (previous + 1) % activeWords.length);
+    }, Math.round(520 / playbackSpeed));
+    return () => window.clearInterval(interval);
+  }, [isPlaying, hasTranscript, activeWords.length, playbackSpeed]);
+
+  useEffect(() => {
+    const currentTime = (scrubberPos / 100) * previewDuration;
+    if (hasTranscript && activeWords.length) {
+      const info = transcribedLayer.current;
+      let bestIndex = 0;
+      for (let index = 0; index < activeWords.length; index++) {
+        const word = activeWords[index];
+        const start = info
+          ? info.startTime + (info.sourceInSeconds + word.start) * (info.stretchPercent / 100)
+          : word.start;
+        if (start <= currentTime) bestIndex = index;
+        else break;
+      }
+      setActiveWordIndex(bestIndex);
+    }
+    setCurrentFrame(Math.max(1, Math.min(totalFrames, Math.floor(currentTime * previewFps) + 1)));
+  }, [scrubberPos, activeWords, hasTranscript, previewDuration, previewFps, totalFrames]);
+
+  useEffect(() => {
+    const info = selection;
+    if (!info) {
+      setWaveformHeights(null);
+      setWaveformStatus("Select an audio layer to analyze its waveform.");
+      return;
+    }
+
+    let cancelled = false;
+    const loadWaveform = async () => {
+      setWaveformHeights(null);
+      setWaveformStatus("Analyzing audio waveform…");
+      try {
+        const ffmpegPath = findFfmpeg();
+        if (!ffmpegPath) {
+          setWaveformStatus("FFmpeg is required to analyze the real waveform.");
+          return;
+        }
+        const heights = await extractWaveformPeaks(
+          ffmpegPath,
+          info.sourceFilePath,
+          info.sourceInSeconds,
+          info.sourceDurationSeconds,
+          64
+        );
+        if (cancelled) return;
+        setWaveformHeights(heights);
+        setWaveformStatus("Audio waveform ready.");
+      } catch (err: any) {
+        if (cancelled) return;
+        setWaveformHeights(null);
+        setWaveformStatus(err?.message || "Could not analyze this source's audio waveform.");
+      }
+    };
+    void loadWaveform();
+    return () => {
+      cancelled = true;
+    };
+  }, [selection?.sourceFilePath, selection?.sourceInSeconds, selection?.sourceDurationSeconds]);
 
   // Handle Preset selection
   const applyPreset = (preset: ViralPreset) => {
@@ -284,6 +364,7 @@ export const AppContent = () => {
       transcribedLayer.current = info;
       setActiveWords(transcript.words);
       setActiveWordIndex(0);
+      setScrubberPos(0);
       setHasTranscript(true);
       setTranscribeStatus(`Done: ${transcript.words.length} words.`);
       showToast({
@@ -379,9 +460,14 @@ export const AppContent = () => {
     }
   };
 
-  // Format timecode
-  const currentTimeSec = ((scrubberPos / 100) * compDuration).toFixed(1);
-  const timecodeDisplay = `00:${currentTimeSec.padStart(4, "0")} / 00:${compDuration.toFixed(1)}`;
+  // Display elapsed time against the selected composition duration.
+  const formatTimelineSeconds = (seconds: number): string => {
+    const safe = Math.max(0, seconds);
+    const minutes = Math.floor(safe / 60);
+    const remainder = (safe % 60).toFixed(1).padStart(4, "0");
+    return `${String(minutes).padStart(2, "0")}:${remainder}`;
+  };
+  const timecodeDisplay = `${formatTimelineSeconds((scrubberPos / 100) * previewDuration)} / ${formatTimelineSeconds(previewDuration)}`;
 
   // Filtered presets for in-tab library
   const tabFilteredPresets = VIRAL_PRESETS.filter((p) => {
@@ -393,6 +479,86 @@ export const AppContent = () => {
       p.description.toLowerCase().includes(librarySearch.toLowerCase());
     return matchesCat && matchesSearch;
   });
+
+  const seekToWord = (requestedIndex: number) => {
+    if (!activeWords.length) return;
+    const index = Math.max(0, Math.min(activeWords.length - 1, requestedIndex));
+    const word = activeWords[index];
+    setActiveWordIndex(index);
+    setIsPlaying(false);
+    const info = transcribedLayer.current;
+    const targetTime = info
+      ? info.startTime + (info.sourceInSeconds + word.start) * (info.stretchPercent / 100)
+      : word.start;
+    const duration = info?.compDuration && info.compDuration > 0 ? info.compDuration : previewDuration;
+    setScrubberPos(Math.max(0, Math.min(100, (targetTime / duration) * 100)));
+  };
+
+  const handleExport = async (format: "srt" | "vtt" | "json") => {
+    const info = transcribedLayer.current;
+    if (!hasTranscript || !info) {
+      showToast({
+        title: "Nothing to export",
+        description: "Transcribe a layer first so the export has a source and valid timing.",
+        variant: "error",
+      });
+      return;
+    }
+    try {
+      let contents: string;
+      if (format === "json") {
+        contents = JSON.stringify({
+          formatVersion: 1,
+          sourceLayer: info.layerName,
+          composition: info.compName,
+          language: language || "auto",
+          timebase: "audio-relative-seconds",
+          words: activeWords,
+        }, null, 2) + "\n";
+      } else {
+        const synced = syncWords(
+          activeWords,
+          {
+            mapping: {
+              startTime: info.startTime,
+              sourceOffset: info.sourceInSeconds,
+              stretchPercent: info.stretchPercent,
+            },
+            inPoint: info.inPoint,
+            outPoint: info.outPoint,
+          },
+          { fps: info.compFrameRate, offsetFrames: 0 }
+        );
+        const groups = buildGroups(synced, {
+          maxWords: 8,
+          maxCharsPerLine: 42,
+          maxLines: 2,
+          pauseBreakSeconds: 0.6,
+          holdSeconds: 0.25,
+          flickerGapSeconds: 0.6,
+          fps: info.compFrameRate,
+          compDuration: info.compDuration,
+          uppercase: false,
+        });
+        contents = formatSubtitles(groups, format as SubtitleFormat);
+      }
+
+      const destination = await evalTS("pickExportPath", format);
+      if (!destination) return;
+      writeExportFile(destination, contents);
+      showToast({
+        title: "Export complete",
+        description: `Saved ${format.toUpperCase()} to ${destination}`,
+        variant: "success",
+      });
+    } catch (err: any) {
+      showToast({
+        title: "Export failed",
+        description: err?.message || String(err),
+        variant: "error",
+      });
+    }
+  };
 
   return (
     <div className="bg-surface text-on-surface flex flex-col min-h-screen selection:bg-primary selection:text-on-primary">
@@ -703,40 +869,38 @@ export const AppContent = () => {
                   </span>
                 </div>
 
-                {/* Speech Onset Flags / Markers */}
-                <div className="absolute top-0 bottom-0 left-[12%] w-[1px] bg-tertiary-container/60 pointer-events-none">
-                  <span className="absolute top-0 -left-1 w-2 h-1.5 bg-tertiary-container rounded-b-xs"></span>
-                </div>
-                <div className="absolute top-0 bottom-0 left-[34%] w-[1px] bg-primary/70 pointer-events-none">
-                  <span className="absolute top-0 -left-1 w-2 h-1.5 bg-primary rounded-b-xs"></span>
-                </div>
-                <div className="absolute top-0 bottom-0 left-[58%] w-[1px] bg-primary/70 pointer-events-none">
-                  <span className="absolute top-0 -left-1 w-2 h-1.5 bg-primary rounded-b-xs"></span>
-                </div>
-                <div className="absolute top-0 bottom-0 left-[76%] w-[1px] bg-tertiary-container/60 pointer-events-none">
-                  <span className="absolute top-0 -left-1 w-2 h-1.5 bg-tertiary-container rounded-b-xs"></span>
-                </div>
+                {/* Word markers are derived from the current transcript, not hard-coded placeholders. */}
+                {hasTranscript && activeWords.filter((_word, index) => index % 5 === 0).map((word, markerIndex) => {
+                  const info = transcribedLayer.current;
+                  const time = info
+                    ? info.startTime + (info.sourceInSeconds + word.start) * (info.stretchPercent / 100)
+                    : word.start;
+                  const position = Math.max(0, Math.min(100, (time / previewDuration) * 100));
+                  return (
+                    <div
+                      key={`word-marker-${markerIndex}-${word.start}`}
+                      className="absolute top-0 bottom-0 w-px bg-primary/40 pointer-events-none"
+                      style={{ left: `${position}%` }}
+                    />
+                  );
+                })}
 
-                {/* Generative Multi-Layer Audio Waveform */}
+                {/* Real waveform peaks computed from the selected source audio. */}
                 <div className="w-full h-10 flex items-end justify-between gap-[1px] px-0.5 z-0 opacity-90">
-                  {[
-                    18, 28, 64, 92, 80, 54, 22, 15, 72, 100, 85, 68, 30, 18, 48, 94, 76, 45, 20, 65, 88, 60, 25, 14, 70, 96, 75, 40, 22, 12,
-                  ].map((height, idx) => {
+                  {waveformHeights && waveformHeights.length ? waveformHeights.map((height, idx) => {
                     const isHigh = height > 60;
                     return (
                       <span
                         key={idx}
-                        className={`w-[2px] rounded-t-xs transition-all ${
-                          isHigh
-                            ? "bg-primary shadow-[0_0_6px_#c0c1ff]"
-                            : height > 35
-                            ? "bg-primary-container"
-                            : "bg-outline-variant"
-                        }`}
+                        className={`flex-1 min-w-[1px] rounded-t-xs transition-colors ${isHigh ? "bg-primary shadow-[0_0_6px_#c0c1ff]" : height > 30 ? "bg-primary-container" : "bg-outline-variant"}`}
                         style={{ height: `${height}%` }}
                       />
                     );
-                  })}
+                  }) : (
+                    <span className="w-full text-center text-[9px] text-on-surface-variant font-mono">
+                      {waveformStatus}
+                    </span>
+                  )}
                 </div>
 
                 {/* Playhead & Scrubber Cursor */}
@@ -853,6 +1017,47 @@ export const AppContent = () => {
                   <span>{isTranscribing ? "Cancel" : hasTranscript ? "Re-Transcribe" : "Transcribe"}</span>
                 </button>
               </div>
+            </section>
+
+            {/* EDITABLE TRANSCRIPT */}
+            <section className="flex flex-col bg-surface-container rounded-lg p-space-sm shadow-sm gap-space-xs select-text">
+              <div className="flex items-center justify-between gap-space-sm flex-wrap">
+                <div className="flex items-center gap-space-xs">
+                  <span className="material-symbols-outlined text-[14px] text-secondary">edit_note</span>
+                  <span className="font-headline-xs text-headline-xs text-on-surface font-semibold">Transcript editor</span>
+                  <span className="font-label-xs text-label-xs text-on-surface-variant">
+                    {hasTranscript ? `${activeWords.length} words` : "Waiting for transcription"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(["srt", "vtt", "json"] as const).map((format) => (
+                    <button
+                      key={format}
+                      type="button"
+                      onClick={() => handleExport(format)}
+                      disabled={!hasTranscript || isTranscribing || isBuilding}
+                      className="h-7 px-2 rounded bg-surface-container-high hover:bg-surface-variant text-on-surface text-[10px] font-semibold disabled:opacity-40"
+                      title={`Export current edited transcript as ${format.toUpperCase()}`}
+                    >
+                      Export {format.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="font-label-xs text-label-xs text-on-surface-variant">
+                Click a word to correct its text or timing, remove an unwanted word, or insert a missing word. Edits are used for both After Effects generation and exports.
+              </p>
+              <TranscriptEditor
+                words={hasTranscript ? activeWords : []}
+                activeWordIndex={activeWordIndex}
+                disabled={isTranscribing || isBuilding}
+                onSelectWord={seekToWord}
+                onChange={(words) => {
+                  setActiveWords(words);
+                  setHasTranscript(words.length > 0);
+                  setActiveWordIndex((index) => Math.max(0, Math.min(index, Math.max(0, words.length - 1))));
+                }}
+              />
             </section>
 
             {/* LIVE PREVIEW CANVAS (CENTERPIECE) */}
@@ -1350,7 +1555,7 @@ export const AppContent = () => {
                   {/* Step Back / Play / Step Forward */}
                   <div className="flex items-center gap-space-xs">
                     <button
-                      onClick={() => setActiveWordIndex((prev) => (prev > 0 ? prev - 1 : activeWords.length - 1))}
+                      onClick={() => seekToWord(activeWordIndex > 0 ? activeWordIndex - 1 : activeWords.length - 1)}
                       className="w-6 h-6 flex items-center justify-center rounded bg-surface-container-high text-on-surface hover:text-primary transition-colors cursor-pointer"
                       title="Previous Word"
                     >
@@ -1366,7 +1571,7 @@ export const AppContent = () => {
                       </span>
                     </button>
                     <button
-                      onClick={() => setActiveWordIndex((prev) => (prev + 1) % activeWords.length)}
+                      onClick={() => seekToWord((activeWordIndex + 1) % activeWords.length)}
                       className="w-6 h-6 flex items-center justify-center rounded bg-surface-container-high text-on-surface hover:text-primary transition-colors cursor-pointer"
                       title="Next Word"
                     >

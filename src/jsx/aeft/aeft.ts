@@ -575,3 +575,30 @@ export const buildCaptions = (
 
   return { words: wordCount, captions: groups.length, precompName: precompName };
 };
+
+
+/** Opens After Effects' native save dialog for a supported subtitle/data export. */
+export const pickExportPath = (format: string): string | null => {
+  let extension = "";
+  let title = "Export file";
+  if (format === "srt") {
+    extension = "srt";
+    title = "Export SubRip subtitles";
+  } else if (format === "vtt") {
+    extension = "vtt";
+    title = "Export WebVTT subtitles";
+  } else if (format === "json") {
+    extension = "json";
+    title = "Export transcript JSON";
+  } else {
+    throw new Error("Unsupported export format.");
+  }
+
+  const chosen = File.saveDialog(title, "*." + extension);
+  if (!chosen) return null;
+  const currentPath = chosen.fsName;
+  const requiredSuffix = "." + extension;
+  return currentPath.toLowerCase().slice(-requiredSuffix.length) === requiredSuffix
+    ? currentPath
+    : currentPath + requiredSuffix;
+};
