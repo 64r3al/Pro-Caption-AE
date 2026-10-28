@@ -128,7 +128,7 @@ interface TranscriptResult {
   language?: string;
   duration?: number;
   words: TranscriptWord[];      // from verbose_json.words, or spread evenly across segments
-  segments: GroqSegment[];      // kept for avg_logprob/no_speech_prob (low-confidence flagging, Phase 3)
+  segments: GroqSegment[];      // kept for future segment-level review; not a calibrated per-word confidence score
 }
 ```
 
@@ -153,15 +153,14 @@ interface CaptionStyle {
 }
 ```
 
-### Not yet built: the on-disk `captions.json` + single-text-layer approach
+### Deferred: the on-disk `captions.json` + single-text-layer approach
 
 The master prompt's "performance-first" comp-building idea — one text layer driven by
 `footage("captions.json").sourceData` plus Expression Selectors, rather than one text layer
 per caption — is real and worth doing, but Phase 2 builds N discrete precomposed text
 layers instead (closer to `Groq_Captions.jsx`'s original design). Deliberately deferred
 rather than built speculatively: the whole point of the JSON-driven approach is "edit a
-word/timing and the comp updates without a rebuild," which only pays off once Phase 3's
-editor exists to actually DO that editing. Building it now would mean guessing at the
+word/timing and the comp updates without a rebuild," which only pays off when the editor also persists edits and can rebuild its generated composition reliably. Building it now would mean guessing at the
 editor's needs; building it alongside the editor means the file shape is driven by what the
 editor actually needs to read and write. "Bake to layers" (today's Phase 2 behavior) stays
 available either way as an explicit option for manual per-layer tweaking outside the editor.
@@ -288,27 +287,25 @@ interface StoredSettings {
 
 ## Phase status
 
-- **Phase 1: done.** Scaffold, manifest/debug/ZXP config, typed bridge, Settings tab (API
-  key + ffmpeg), audio extraction, raw transcript view in the Transcribe tab.
-- **Phase 2: done.** Frame-quantized time mapping (`shared/sync.ts`) + RMS-envelope onset
-  refinement (`shared/onset.ts` + `lib/services/onset.ts`), caption grouping
-  (`shared/captions.ts`), and comp/text-layer generation with per-word Expression-Selector
-  animators (`jsx/aeft/aeft.ts#buildCaptions`) — all ported from `Groq_Captions.jsx`'s
-  proven `mapToComp`/`applySync`/`buildGroups`/animator code, now unit tested (56 tests,
-  `npm run test`) and wired end-to-end in the panel (now `App.tsx` via `lib/services/pipeline.ts`). Also closed the
-  Phase 1 "no chunking" gap: audio over `CHUNK_MAX_SECONDS` is split, transcribed per chunk,
-  and stitched (`shared/chunking.ts`). Not yet a `captions.json`-driven single-text-layer
-  approach — each caption is still its own layer, precomposed; that performance-oriented
-  rework is worth doing once the Phase 3 editor needs live-editable timing anyway (see the
-  next section).
-- **Phase 3:** live transcript editor, full style controls (font picker, background box,
-  safe margins) + savable presets. This is also the natural point to switch comp-building
-  to the master prompt's `captions.json`-driven single-text-layer approach, since "edit a
-  word, see it update live" needs exactly that (rewrite the JSON, no layer rebuild) and
-  Phase 2 intentionally didn't build it speculatively before there was an editor to need it.
-- **Phase 4:** animation presets beyond pop/highlight/reveal, Social vs. Subtitle modes,
-  SRT/VTT/JSON export.
-- **Phase 5:** transcript caching (skip re-transcribing an unchanged clip), real keychain
-  integration, bundled ffmpeg, async/perf pass on the remaining synchronous calls flagged in
-  the Phase 1 audit (`findFfmpeg`'s `execSync`, `groq.ts`'s whole-file `readFileSync`), ZXP
-  signing/release packaging.
+- **Phase 1 — Foundation:** CEP scaffold, manifest/debug/ZXP config, typed bridge, settings, audio extraction, Groq integration, and the original transcript pipeline.
+- **Phase 2 — Caption generation:** frame-quantized time mapping, RMS-envelope onset refinement, grouping, and native After Effects text-layer generation with per-word expression selectors. Long audio is chunked and stitched.
+- **Phase 3 — Transcript editing (partial in v1.3.0):** the panel has word-level text and timestamp correction, insertion/deletion, selection, and a timeline-linked preview playhead. It does not yet provide group split/merge controls, project-persistent transcript data, or a JSON-driven one-layer representation.
+- **Phase 4 — Export and motion support (partial in v1.3.0):** 66 built-in presets, 15 native text motion types, basic native shape treatments for selected preset types, preset support labels, custom preset save/delete, and SRT/WebVTT/JSON exports. Complex browser-only visual chrome and advanced effects are still simplified for presets identified by the UI as text approximations.
+- **Phase 5 — Reliability and release improvements (partial in v1.3.0):** transcript validation, bounded HTTP request timeout, bounded/cancellable retry backoff, caption preflight validation and best-effort rollback, local custom preset schema validation, and Windows CI on Node.js 24. API-key protection remains encrypted local storage rather than OS credential-store integration; FFmpeg is detected from the system rather than bundled.
+
+## v1.3.0 manual acceptance still required
+
+Automated CI verifies tests, type checking, lint/type checking, production build output, and a basic compiled ExtendScript safety condition. It does **not** run Adobe After Effects. The following must be confirmed inside a real After Effects installation before treating the application behavior as fully verified:
+
+1. Install the packaged ZXP in a clean user profile and confirm the panel opens.
+2. Transcribe a short audio clip and a clip longer than the chunking threshold; compare transcript timing against the audio.
+3. Edit text and timestamps, insert and remove words, then build captions. Confirm edited values are used and automatic onset refinement does not overwrite manual timing.
+4. Generate representative presets with each support label. Inspect their native shapes, stacking order, timing, expressions, and final rendered appearance.
+5. Exercise an invalid build request and inspect the composition to ensure preflight rejects it without changing existing layers.
+6. Test a build failure if a safe reproducible way to trigger one is available; verify rollback removes only generated items and the user's original layers remain.
+7. Test undo, repeated generation, a trimmed/stretched layer, and long compositions.
+8. Export SRT, WebVTT, and JSON, open them in compatible tools, and verify text/timestamps.
+9. Verify Arabic shaping, right-to-left layout, punctuation, font fallback, and mixed Arabic/Latin content in the target After Effects version.
+10. Check cancellation during transcription/retry and ensure temporary audio is cleaned up.
+
+This checklist is intentionally explicit: a green CI job is necessary, but it is not evidence that After Effects-only behavior has been manually confirmed.
