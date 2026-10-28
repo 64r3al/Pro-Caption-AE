@@ -41,4 +41,4 @@ jobs:
       - name: Validate compiled ExtendScript output
         shell: bash
         run: |
-          node -e "const fs=require('node:fs'); const p='dist/cep/jsx/index.js'; if(!fs.existsSync(p)) throw new Error('Expected compiled ExtendScript output is missing: '+p); const s=fs.readFileSync(p,'utf8'); if(/\\bprocess\\.env\\b/.test(s)) throw new Error('Compiled ExtendScript contains process.env, which is unavailable in the After Effects host.'); console.log('Compiled ExtendScript output looks structurally valid.');"
+          node -e "const fs=require('node:fs'); const p='dist/cep/jsx/index.js'; if(!fs.existsSync(p)) throw new Error('Expected compiled ExtendScript output is missing: '+p); const s=fs.readFileSync(p,'utf8'); const executable=s.replace(/\\/\\*[\\s\\S]*?\\*\\//g,'').replace(/(^|[^:])\\/\\/.*$/gm,'$1'); if(/\\bprocess\\.env\\b/.test(executable)) throw new Error('Compiled ExtendScript contains a process.env reference outside comments; this is unavailable in the After Effects host.'); console.log('Compiled ExtendScript output is present and contains no executable process.env reference.');"
