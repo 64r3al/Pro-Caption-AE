@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Check, FileText, Plus, Trash2, X } from "lucide-react";
 import { EmptyState } from "../ui/EmptyState";
 import type { TranscriptWord } from "../../../shared/types";
+import { suggestInsertedWordTiming } from "../../../shared/transcriptEditing";
 
 export interface TranscriptEditorProps {
   words: TranscriptWord[];
@@ -130,32 +131,12 @@ export const TranscriptEditor = ({
       return;
     }
     const insertAt = selectedIndex == null ? words.length : selectedIndex + 1;
-    const previous = insertAt > 0 ? words[insertAt - 1] : null;
-    const next = insertAt < words.length ? words[insertAt] : null;
-    let start: number;
-    let end: number;
-
-    if (previous && next) {
-      if (previous.end < next.start) {
-        // Prefer the quiet gap between neighboring words when there is one.
-        start = previous.end + (next.start - previous.end) / 2;
-      } else {
-        // If existing words overlap, keep the inserted start between their start times.
-        start = previous.start + Math.max(0, next.start - previous.start) / 2;
-      }
-      end = Math.min(start + 0.2, next.start);
-    } else if (previous) {
-      start = previous.end;
-      end = start + 0.2;
-    } else if (next) {
-      // Give a leading inserted word a short default duration instead of spanning the entire
-      // gap before the original first word.
-      end = next.start;
-      start = Math.max(0, end - 0.2);
-    } else {
-      start = 0;
-      end = 0.2;
+    const timing = suggestInsertedWordTiming(words, insertAt);
+    if (!timing) {
+      setError("Correct the surrounding word timings before inserting here; their timeline order is invalid.");
+      return;
     }
+    const { start, end } = timing;
     const nextWords = [
       ...words.slice(0, insertAt),
       { text, start, end },
