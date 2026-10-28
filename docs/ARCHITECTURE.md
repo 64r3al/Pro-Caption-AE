@@ -163,11 +163,13 @@ interface CaptionStyle {
 
 The master prompt's "performance-first" comp-building idea — one text layer driven by
 `footage("captions.json").sourceData` plus Expression Selectors, rather than one text layer
-per caption — remains a future optimization. The v1.3.0 transcript editor currently holds its
-working transcript in panel state and rebuilds the generated composition when requested; it
-does not yet persist edits into a project-backed data source or update one data-driven text
-layer live. Implementing the compact approach must be preceded by a prototype and benchmarks
-that demonstrate reliable editing, word-level timing, style changes, and project reopening.
+per caption — remains a future optimization. The v1.4.0 transcript editor recovers its working
+transcript and manual edits from local panel storage, keyed to a saved project's path,
+composition, selected layer, and source media. Recovery is machine-local and is not embedded
+in or synchronized with the `.aep` file. The editor still rebuilds the generated composition
+when requested; it does not update one data-driven text layer live. Implementing the compact
+approach must be preceded by a prototype and benchmarks that demonstrate reliable editing,
+word-level timing, style changes, and project reopening.
 The existing separate-layer output remains the compatible editable mode until such a prototype
 passes After Effects integration tests.
 
@@ -295,23 +297,26 @@ interface StoredSettings {
 
 - **Phase 1 — Foundation:** CEP scaffold, manifest/debug/ZXP config, typed bridge, settings, audio extraction, Groq integration, and the original transcript pipeline.
 - **Phase 2 — Caption generation:** frame-quantized time mapping, RMS-envelope onset refinement, grouping, and native After Effects text-layer generation with per-word expression selectors. Long audio is chunked and stitched.
-- **Phase 3 — Transcript editing (partial in v1.3.0):** the panel has word-level text and timestamp correction, insertion/deletion, selection, and a timeline-linked preview playhead. It does not yet provide group split/merge controls, project-persistent transcript data, or a JSON-driven one-layer representation.
-- **Phase 4 — Export and motion support (partial in v1.3.0):** 66 built-in presets, 15 native text motion types, basic native shape treatments for selected preset types, preset support labels, custom preset save/delete, and SRT/WebVTT/JSON exports. Complex browser-only visual chrome and advanced effects are still simplified for presets identified by the UI as text approximations.
-- **Phase 5 — Reliability and release improvements (partial in v1.3.0):** transcript validation, bounded HTTP request timeout, bounded/cancellable retry backoff, caption preflight validation and best-effort rollback, local custom preset schema validation, and Windows CI on Node.js 24. API-key protection remains encrypted local storage rather than OS credential-store integration; FFmpeg is detected from the system rather than bundled.
+- **Phase 3 — Transcript editing (partial in v1.4.0):** word-level text and timestamp correction, insertion/deletion, selection, timeline-linked preview, and machine-local recovery for saved project/layer/media identities. Group split/merge controls, embedded project data, and a JSON-driven one-layer representation remain future work.
+- **Phase 4 — Export and motion support (partial in v1.4.0):** 66 built-in presets, 15 native text motion types, static output mode, optional stroke removal, native shape treatments for selected preset types, support labels, custom preset save/delete, and SRT/WebVTT/JSON exports. Complex browser-only visual chrome and advanced effects remain simplified for presets identified as text approximations.
+- **Phase 5 — Reliability and release improvements (partial in v1.4.0):** transcript validation, bounded HTTP timeout, cancellable retry backoff, upload filename sanitization, local transcript recovery, caption preflight validation and best-effort rollback, custom-preset validation, and Windows CI on Node.js 24. API-key protection remains encrypted local storage rather than OS credential-store integration; FFmpeg is detected from the system rather than bundled.
 
-## v1.3.0 manual acceptance still required
+## v1.4.0 manual acceptance still required
 
 Automated CI verifies tests, type checking, lint/type checking, production build output, and a basic compiled ExtendScript safety condition. It does **not** run Adobe After Effects. The following must be confirmed inside a real After Effects installation before treating the application behavior as fully verified:
 
 1. Install the packaged ZXP in a clean user profile and confirm the panel opens.
 2. Transcribe a short audio clip and a clip longer than the chunking threshold; compare transcript timing against the audio.
 3. Edit text and timestamps, insert and remove words, then build captions. Confirm edited values are used and automatic onset refinement does not overwrite manual timing.
-4. Generate representative presets with each support label. Inspect their native shapes, stacking order, timing, expressions, and final rendered appearance.
-5. Exercise an invalid build request and inspect the composition to ensure preflight rejects it without changing existing layers.
-6. Test a build failure if a safe reproducible way to trigger one is available; verify rollback removes only generated items and the user's original layers remain.
-7. Test undo, repeated generation, a trimmed/stretched layer, and long compositions.
-8. Export SRT, WebVTT, and JSON, open them in compatible tools, and verify text/timestamps.
-9. Verify Arabic shaping, right-to-left layout, punctuation, font fallback, and mixed Arabic/Latin content in the target After Effects version.
-10. Check cancellation during transcription/retry and ensure temporary audio is cleaned up.
+4. Close and reopen the panel for a saved project; confirm its transcript and edits restore only for the matching project, composition, selected layer, and source. Confirm unsaved projects show that recovery is unavailable.
+5. Build one static caption example and confirm no reveal, word highlight, pop, or text motion remains while spoken-word caption timing is retained.
+6. Build a preset with an outline, disable Text Stroke, and verify both the preview and generated AE text have no outline. Confirm presets without a stroke do not offer an active toggle.
+7. Generate representative presets with each support label. Inspect their native shapes, stacking order, timing, expressions, and final rendered appearance.
+8. Exercise an invalid build request and inspect the composition to ensure preflight rejects it without changing existing layers.
+9. Test a build failure if a safe reproducible way to trigger one is available; verify rollback removes only generated items and the user's original layers remain.
+10. Test undo, repeated generation, a trimmed/stretched layer, and long compositions.
+11. Export SRT, WebVTT, and JSON, open them in compatible tools, and verify text/timestamps.
+12. Verify Arabic shaping, right-to-left layout, punctuation, font fallback, and mixed Arabic/Latin content in the target After Effects version.
+13. Check cancellation during transcription/retry and ensure temporary audio is cleaned up.
 
 This checklist is intentionally explicit: a green CI job is necessary, but it is not evidence that After Effects-only behavior has been manually confirmed.

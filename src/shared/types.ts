@@ -5,6 +5,8 @@
  * host-side because only ExtendScript can read the AE project/comp/layer model. */
 export interface SelectedAudioLayerInfo {
   compId: number;
+  /** Absolute path of the saved project; omitted when the project has not been saved yet. */
+  projectFilePath?: string;
   compName: string;
   compWidth: number;
   compHeight: number;
@@ -113,6 +115,8 @@ export interface CaptionStyle {
   yOffset?: number;
   /** Entry/emphasis motion (see shared/motion.ts). */
   motion?: string;
+  /** Disables all time-varying text effects while preserving caption layer timing. */
+  staticAnimation?: boolean;
 }
 
 export interface BuildCaptionsResult {

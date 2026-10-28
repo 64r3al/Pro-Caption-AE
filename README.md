@@ -41,7 +41,7 @@ The badges above show live GitHub release, download, star, and license informati
 - **Transcribe selected footage or audio** with word-level timestamps.
 - **Handle longer recordings** by splitting audio into overlapping chunks and stitching the results.
 - **Refine timing** against the audio waveform, then adjust individual words and timestamps yourself.
-- **Style captions** with 66 built-in presets, 15 motion types, installed fonts, and adjustable colors and placement.
+- **Style captions** with 66 built-in presets, 15 motion types, installed fonts, and adjustable colors and placement. Choose static captions with no animation or remove a preset's text stroke.
 - **See a measured waveform** for the selected source audio and follow transcript words along the timeline.
 - **Build editable captions in After Effects** as text layers, grouped in a generated precomposition.
 - **Export subtitles and transcripts** as SRT, WebVTT, or JSON.
@@ -75,7 +75,7 @@ Create a key at [console.groq.com/keys](https://console.groq.com/keys), open **S
 1. Open a composition and select one footage or audio layer that contains the voice.
 2. In **Transcribe**, choose a Whisper model and, if needed, a language or glossary.
 3. Transcribe the audio. Review and correct words or timestamps in the transcript editor.
-4. Choose a preset and adjust the font, motion, colors, grouping, and placement.
+4. Choose a preset and adjust the font, motion, colors, grouping, and placement. Select **None (Static)** to keep speech-timed captions without text motion, reveal, pop, or word highlighting; turn off **Text Stroke** to remove an outline where the preset has one.
 5. Select **Build in AE** to create the caption layers in the composition.
 
 For screenshots, troubleshooting, and the full install steps, see the [installation guide](INSTALLATION.md).
@@ -84,8 +84,8 @@ For screenshots, troubleshooting, and the full install steps, see the [installat
 
 - The extension extracts audio from the selected layer and sends it to the **Groq transcription API** using the API key you provide. Do not transcribe sensitive media unless that use is appropriate for your organization and provider settings.
 - Your API key is stored locally in encrypted settings on the machine. It is not stored in the After Effects project. This is local at-rest encryption, not an operating-system credential vault.
-- Custom presets and font preferences are stored locally.
-- Transcripts and manual transcript edits are held in the panel while it is open. **Export your transcript or build your captions before closing the panel**; project-backed transcript recovery is not currently included.
+- Custom presets, font preferences, and transcript recovery records are stored locally on this machine.
+- After transcribing a layer in a **saved** After Effects project, the transcript and manual edits can be restored for that project, composition, layer, and source file when the panel is reopened. Recovery data is stored in the local panel profile, not inside the `.aep` file, and is not synchronized to another machine. Unsaved projects cannot use recovery; export JSON or build captions for a separate backup.
 
 ## Compatibility and current limitations
 
@@ -93,6 +93,7 @@ For screenshots, troubleshooting, and the full install steps, see the [installat
 - The preview is a guide, not a pixel-perfect render of every After Effects treatment.
 - Arabic casing is preserved, but right-to-left layout, shaping, mixed-direction punctuation, and word animation need verification in the target After Effects version.
 - Transcript editing is word-level; group split/merge editing is not available.
+- Static mode disables text motion, reveal, pop, and word highlighting while keeping the captions timed to the spoken words. Stroke removal only affects presets that include an outline.
 - Full audio playback in the panel and a compact single-text-layer generator are not included.
 - The ZXP build and automated checks can pass without exercising After Effects itself. Test installation, caption creation, undo, timing, and your chosen presets in your supported AE version before relying on them for important work.
 

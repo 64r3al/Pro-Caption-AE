@@ -1,27 +1,19 @@
-## Pro Caption AE v1.3.0
+## Pro Caption AE v1.4.0
 
-Reliability, transcript editing, waveform analysis, and export improvements.
+Static caption output, optional stroke removal, and local transcript recovery.
 
-- Adds a bounded request timeout to Groq transcription calls, defensive response normalization, tested exponential backoff, and cancellation during retry backoff. If the server requests a wait longer than the automatic retry window, the app does not retry earlier.
-- Validates word-level timestamps and uses validated segment-based timing only when usable word-level timestamps are unavailable.
-- Adds tests for malformed transcript data, waveform peak compression, subtitle formatting, custom-preset validation, preset render-support labels, and language handling.
-- Adds transcript word correction, insertion/deletion, and timestamp editing in the panel. Manual timing edits are preserved by skipping automatic onset refinement for edited transcripts.
-- Replaces decorative waveform bars with peaks analyzed from the selected source audio and aligns the waveform to the selected layer's visible composition range.
-- Adds SRT, WebVTT, and JSON transcript exports. Subtitle export uses the selected words-per-group and pause-splitting settings.
-- Adds locally saved custom presets with validation, a schema version, a 100-preset cap, and delete support.
-- Adds native After Effects shape treatments for selected card/accent presets and visible support labels explaining which presets are native shape treatments, native text motion, or simplified text approximations.
-- Avoids forced uppercase for detected or explicitly selected Arabic transcripts.
-- Improves API-key test error handling so the Settings panel does not remain stuck in a loading state.
-- Adds preflight validation and best-effort cleanup of generated layers/precompositions when a caption build fails.
-- Adds Windows CI for unit tests, type checks, production builds, and compiled ExtendScript sanity checks.
-- Updates the release toolchain to Node.js 24 and verifies that the requested tag matches both package.json and package-lock.json.
+- Adds **None (Static)** output mode. Generated captions keep their speech timing but omit text reveal, highlight, pop, and motion animation.
+- Adds a **Text Stroke** control to remove a preset's outline from the preview and generated After Effects text. Presets without an outline show the control as unavailable.
+- Saves transcripts and manual word/timing edits locally for a saved After Effects project, composition, selected layer, and source media. Matching work can be restored when the panel is reopened on the same machine and project path.
+- Adds schema and source-identity validation for recovery records, with a clear size/storage error and JSON-export guidance when recovery cannot be saved.
+- Sanitizes the uploaded audio filename so user-controlled paths cannot alter the Groq multipart header.
+- Adds automated coverage for recovery identity, malformed data, path-case separation, filename sanitization, and custom preset persistence of static/no-stroke choices.
 
-### Known limitations
+### Important limits
 
-- The extension could not be exercised inside an installed Adobe After Effects session as part of this automated change. Before relying on it for important work, test caption creation, undo, new native shape treatments, long clips, and cancellation inside your supported After Effects version.
-- Preset support badges intentionally disclose simplified output. They do not promise pixel-identical reproduction of every browser-preview decoration.
-- Arabic text casing is preserved, but right-to-left paragraph layout, shaping, mixed-direction punctuation, and word animation still require real After Effects acceptance testing.
-- The transcript editor edits individual words and timings; group-level split/merge editing and persistent project-backed transcript recovery are not included in this release.
-- The compact single-text-layer/captions.json generator and a full audio-playback preview remain future work.
+- Transcript recovery is stored in the local After Effects panel profile. It is not embedded in the `.aep` project, does not follow a project moved or renamed to another path, and is not synchronized to another machine. Export JSON for a portable backup.
+- Automated CI checks tests, types, build output, and compiled ExtendScript safeguards. It does not run Adobe After Effects. Follow the manual acceptance checklist in [docs/ARCHITECTURE.md](https://github.com/64r3al/Pro-Caption-AE/blob/main/docs/ARCHITECTURE.md#v140-manual-acceptance-still-required) before relying on the extension for important work.
+- Preset support badges explain when browser-preview decorations are simplified in the generated composition.
+- Arabic right-to-left layout, shaping, mixed-direction punctuation, and word animation still require acceptance testing in the target After Effects version.
 
-Requires After Effects 2024 (v24) or newer and FFmpeg. See [INSTALLATION.md](https://github.com/64r3al/Pro-Caption-AE/blob/main/INSTALLATION.md) for details.
+Requires After Effects 2024 (v24) or newer and FFmpeg. See [INSTALLATION.md](https://github.com/64r3al/Pro-Caption-AE/blob/main/INSTALLATION.md) for setup instructions.

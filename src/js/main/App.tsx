@@ -38,6 +38,7 @@ import { PresetLibraryModal } from "./features/PresetLibraryModal";
 import { TranscriptEditor } from "./features/TranscriptEditor";
 import { writeExportFile } from "../lib/services/export";
 import { loadCustomPresets, persistCustomPresets } from "../lib/services/customPresets";
+import { loadRecoveredTranscript, saveRecoveredTranscript } from "../lib/services/transcriptRecovery";
 import { syncWords } from "../../shared/sync";
 import { buildGroups } from "../../shared/captions";
 import { formatSubtitles, type SubtitleFormat } from "../../shared/subtitles";
@@ -85,6 +86,7 @@ export const AppContent = () => {
   const [hasTranscript, setHasTranscript] = useState(false);
   const [isTranscriptEdited, setIsTranscriptEdited] = useState(false);
   const [transcriptRevision, setTranscriptRevision] = useState(0);
+  const [transcriptRecoveryNotice, setTranscriptRecoveryNotice] = useState<string | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const jobRef = useRef<TranscriptionJob | null>(null);
   // Audio the current transcript came from, kept for onset refinement at build time.
@@ -145,7 +147,13 @@ export const AppContent = () => {
   // null = use the preset's own motion. Kinetic Motion presets and any override preview the
   // exact motion After Effects will build; classic presets keep their bespoke preview looks.
   const [motionOverride, setMotionOverride] = useState<MotionType | null>(null);
+  const [staticAnimation, setStaticAnimation] = useState(false);
   const effectiveMotion: MotionType = motionOverride ?? motionForAnimMode(currentPreset.animMode);
+  const isStaticAnimation = staticAnimation;
+  const [strokeEnabled, setStrokeEnabled] = useState(currentPreset.strokeWidth > 0);
+  const hasPresetStroke = currentPreset.strokeWidth > 0;
+  const isStrokeEnabled = hasPresetStroke && strokeEnabled;
+  const effectiveStrokeWidth = isStrokeEnabled ? currentPreset.strokeWidth : 0;
   // Font: null = the preset's font. The choice sticks across presets and panel reloads.
   const [fontOverride, setFontOverride] = useState<string | null>(() => getSavedFontOverride());
   const [fontList, setFontList] = useState<FontList | null>(() => getCachedFonts());
@@ -171,8 +179,11 @@ export const AppContent = () => {
     saveFontOverride(postScriptName);
   };
 
-  const previewMotionClass =
-    motionOverride || currentPreset.animMode.startsWith("motion:") ? `live-motion-${effectiveMotion}` : null;
+  const previewMotionClass = isStaticAnimation
+    ? null
+    : motionOverride || currentPreset.animMode.startsWith("motion:")
+    ? `live-motion-${effectiveMotion}`
+    : null;
 
   const refreshSelection = async (): Promise<SelectedAudioLayerInfo | null> => {
     setLoadingSelection(true);
@@ -180,6 +191,31 @@ export const AppContent = () => {
       const info = await evalTS("getSelectedAudioLayerInfo");
       setSelection(info);
       setSelectionError(null);
+      const recovered = loadRecoveredTranscript(info);
+      if (recovered) {
+        const previousLayer = transcribedLayer.current;
+        const isSameSource = !!previousLayer && previousLayer.compId === info.compId &&
+          previousLayer.layerIndex === info.layerIndex &&
+          previousLayer.sourceFilePath.replace(/\\/g, "/") === info.sourceFilePath.replace(/\\/g, "/") &&
+          previousLayer.projectFilePath?.replace(/\\/g, "/") === info.projectFilePath?.replace(/\\/g, "/");
+        if (!isSameSource) {
+          if (transcriptAudio.current.path && transcriptAudio.current.isTemp) {
+            removeTempFile(transcriptAudio.current.path);
+          }
+          transcriptAudio.current = { path: null, isTemp: false };
+        }
+        transcribedLayer.current = info;
+        setActiveWords(recovered.words);
+        setTranscriptLanguage(recovered.language);
+        setIsTranscriptEdited(recovered.edited);
+        setHasTranscript(true);
+        setTranscriptRevision((revision) => revision + 1);
+        setActiveWordIndex(0);
+        setScrubberPos(0);
+        setTranscriptRecoveryNotice(
+          `Recovered ${recovered.words.length} words saved ${new Date(recovered.updatedAt).toLocaleString()}.`
+        );
+      }
       return info;
     } catch (err: any) {
       setSelection(null);
@@ -296,6 +332,8 @@ export const AppContent = () => {
   const applyPreset = (preset: ViralPreset) => {
     setSelectedPresetId(preset.id);
     setMotionOverride(preset.motionOverride && isMotionType(preset.motionOverride) ? preset.motionOverride : null);
+    setStaticAnimation(preset.staticAnimation ?? false);
+    setStrokeEnabled(preset.strokeWidth > 0 && (preset.strokeEnabled ?? true));
     if (preset.id.startsWith("custom-")) {
       setFontOverride(preset.font);
       saveFontOverride(preset.font);
@@ -354,6 +392,8 @@ export const AppContent = () => {
       baseColor,
       highlightColor,
       strokeWidth: currentPreset.strokeWidth ?? 0,
+      strokeEnabled: isStrokeEnabled,
+      staticAnimation,
       strokeColor: currentPreset.strokeColor || "#000000",
       posIndex: currentPreset.posIndex,
       reveal: currentPreset.reveal ?? true,
@@ -495,6 +535,16 @@ export const AppContent = () => {
       setScrubberPos(0);
       setHasTranscript(true);
       setIsTranscriptEdited(false);
+      try {
+        const saved = saveRecoveredTranscript(info, transcript.words, transcript.language || "", false);
+        setTranscriptRecoveryNotice(
+          saved
+            ? "Transcript is saved locally and will be restored for this project and layer."
+            : "Save the After Effects project to enable local transcript recovery."
+        );
+      } catch (recoveryError: any) {
+        setTranscriptRecoveryNotice("Local recovery could not be saved. Export the transcript as JSON to keep a backup.");
+      }
       setTranscribeStatus(`Done: ${transcript.words.length} words.`);
       showToast({
         title: "Transcription Complete",
@@ -565,14 +615,15 @@ export const AppContent = () => {
         textColor: hexToInt(baseColor) ?? DEFAULT_CAPTION_STYLE.textColor,
         highlightColor: hexToInt(highlightColor) ?? DEFAULT_CAPTION_STYLE.highlightColor,
         strokeColor: hexToInt(currentPreset.strokeColor) ?? DEFAULT_CAPTION_STYLE.strokeColor,
-        strokeWidth: currentPreset.strokeWidth ?? DEFAULT_CAPTION_STYLE.strokeWidth,
+        strokeWidth: effectiveStrokeWidth,
         posIndex: (currentPreset.posIndex ?? DEFAULT_CAPTION_STYLE.posIndex) as CaptionPositionIndex,
-        reveal: currentPreset.reveal ?? true,
-        highlight: currentPreset.highlight ?? true,
-        pop: bounceScale > 0,
+        reveal: !isStaticAnimation && (currentPreset.reveal ?? true),
+        highlight: !isStaticAnimation && (currentPreset.highlight ?? true),
+        pop: !isStaticAnimation && bounceScale > 0,
         bounceScale,
         yOffset,
         motion: effectiveMotion,
+        staticAnimation: isStaticAnimation,
         shadow: currentPreset.shadow ?? true,
         leadInFrames: DEFAULT_SYNC_OPTIONS.leadInFrames,
         animMode: currentPreset.animMode,
@@ -1212,6 +1263,11 @@ export const AppContent = () => {
               <p className="font-label-xs text-label-xs text-on-surface-variant">
                 Click a word to correct its text or timing, remove an unwanted word, or insert a missing word. Edits are used for both After Effects generation and exports.
               </p>
+              {hasTranscript && transcriptRecoveryNotice && (
+                <p className="font-label-xs text-label-xs text-on-surface-variant" role="status">
+                  {transcriptRecoveryNotice}
+                </p>
+              )}
               <TranscriptEditor
                 key={transcriptRevision}
                 words={hasTranscript ? activeWords : []}
@@ -1222,6 +1278,19 @@ export const AppContent = () => {
                   setActiveWords(words);
                   setHasTranscript(words.length > 0);
                   setIsTranscriptEdited(true);
+                  const info = transcribedLayer.current;
+                  if (info) {
+                    try {
+                      const saved = saveRecoveredTranscript(info, words, transcriptLanguage, true);
+                      setTranscriptRecoveryNotice(
+                        saved
+                          ? "Edits are saved locally for this project and layer."
+                          : "Save the After Effects project to enable local transcript recovery."
+                      );
+                    } catch {
+                      setTranscriptRecoveryNotice("Local recovery could not be saved. Export the transcript as JSON to keep a backup.");
+                    }
+                  }
                   setActiveWordIndex((index) => {
                     const preferred = focusIndex === undefined ? index : focusIndex;
                     return Math.max(0, Math.min(preferred, Math.max(0, words.length - 1)));
@@ -1288,7 +1357,7 @@ export const AppContent = () => {
 
                 {/* CENTERSTAGE CAPTION: Word-by-Word Kinetic Display with Active Preset Styling */}
                 <div
-                  className="pca-font-scope relative z-10 my-auto flex flex-col items-center justify-center text-center px-space-sm pointer-events-none transition-transform duration-200 w-full"
+                  className={`pca-font-scope relative z-10 my-auto flex flex-col items-center justify-center text-center px-space-sm pointer-events-none transition-transform duration-200 w-full${isStaticAnimation ? " gc-static-caption-preview" : ""}`}
                   style={
                     {
                       transform: `translateY(${yOffset / 8}px)`,
@@ -1509,8 +1578,8 @@ export const AppContent = () => {
                                 : currentPreset.animMode === "sticker"
                                 ? "6px"
                                 : undefined,
-                            WebkitTextStroke: currentPreset.strokeWidth
-                              ? `${Math.max(1, Math.round(currentPreset.strokeWidth * 0.45))}px ${currentPreset.strokeColor}`
+                            WebkitTextStroke: effectiveStrokeWidth
+                              ? `${Math.max(1, Math.round(effectiveStrokeWidth * 0.45))}px ${currentPreset.strokeColor}`
                               : undefined,
                             textShadow:
                               currentPreset.animMode === "shadow-pop"
@@ -1636,8 +1705,8 @@ export const AppContent = () => {
                                         ? "#FFFFFF"
                                         : undefined,
                                     fontSize: `${Math.round(fontSize * 0.36)}px`,
-                                    WebkitTextStroke: currentPreset.strokeWidth
-                                      ? `${Math.max(1, Math.round(currentPreset.strokeWidth * 0.4))}px ${
+                                    WebkitTextStroke: effectiveStrokeWidth
+                                      ? `${Math.max(1, Math.round(effectiveStrokeWidth * 0.4))}px ${
                                           currentPreset.strokeColor
                                         }`
                                       : undefined,
@@ -1675,8 +1744,8 @@ export const AppContent = () => {
                                 color: baseColor,
                                 opacity: isPast ? 0.95 : 0.4,
                                 fontSize: `${Math.round(fontSize * 0.3)}px`,
-                                WebkitTextStroke: currentPreset.strokeWidth
-                                  ? `${Math.max(1, Math.round(currentPreset.strokeWidth * 0.3))}px ${
+                                WebkitTextStroke: effectiveStrokeWidth
+                                  ? `${Math.max(1, Math.round(effectiveStrokeWidth * 0.3))}px ${
                                       currentPreset.strokeColor
                                     }`
                                   : undefined,
@@ -1870,14 +1939,19 @@ export const AppContent = () => {
                     <span className="font-body-sm text-body-sm text-on-surface">Animation</span>
                   </div>
                   <select
-                    value={motionOverride ?? ""}
-                    onChange={(e) => setMotionOverride(e.target.value ? (e.target.value as MotionType) : null)}
+                    value={isStaticAnimation ? "static" : motionOverride ?? ""}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setStaticAnimation(value === "static");
+                      if (value !== "static") setMotionOverride(value ? (value as MotionType) : null);
+                    }}
                     className="h-7 min-w-[150px] bg-surface-container-high text-on-surface font-label-sm text-label-sm rounded px-space-sm cursor-pointer border border-outline-variant/40 focus:border-primary outline-none"
                     title="Motion used in the preview and in After Effects"
                   >
                     <option value="">
                       Preset: {MOTION_OPTIONS.find((o) => o.value === motionForAnimMode(currentPreset.animMode))?.label}
                     </option>
+                    <option value="static">None (Static)</option>
                     {MOTION_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>
                         {opt.label}
@@ -1885,6 +1959,21 @@ export const AppContent = () => {
                     ))}
                   </select>
                 </div>
+
+                <label className={`flex items-center justify-between gap-space-sm bg-surface-container-lowest px-space-sm py-1 rounded min-h-[36px] ${hasPresetStroke ? "cursor-pointer" : "cursor-not-allowed opacity-70"}`}>
+                  <span className="font-body-sm text-body-sm text-on-surface">Text Stroke</span>
+                  <span className="flex items-center gap-space-xs">
+                    <span className="font-label-xs text-on-surface-variant">{isStrokeEnabled ? "On" : "Off"}</span>
+                    <input
+                      type="checkbox"
+                      checked={isStrokeEnabled}
+                      disabled={!hasPresetStroke}
+                      onChange={(event) => setStrokeEnabled(event.target.checked)}
+                      aria-label="Enable text stroke"
+                      title={hasPresetStroke ? "Enable or remove this preset's text stroke" : "This preset has no text stroke"}
+                    />
+                  </span>
+                </label>
 
                 <FontPicker
                   value={fontOverride}

@@ -53,6 +53,7 @@ export const getSelectedAudioLayerInfo = (): SelectedAudioLayerInfo => {
 
   return {
     compId: comp.id,
+    projectFilePath: app.project.file ? app.project.file.fsName : "",
     compName: comp.name,
     compWidth: comp.width,
     compHeight: comp.height,
@@ -377,7 +378,7 @@ const createCaptionLayer = (
       endTimes.push(Math.min(group.end, Math.max(group.words[i].end, nextStart)));
     }
 
-    if (style.highlight) {
+    if (!style.staticAnimation && style.highlight) {
       const hc = intToRgb(style.highlightColor);
       addWordAnimator(
         lyr,
@@ -387,7 +388,7 @@ const createCaptionLayer = (
         exprActiveWord(times, endTimes)
       );
     }
-    if (style.pop) {
+    if (!style.staticAnimation && style.pop) {
       // The selector swings 0 -> ~100 -> 0 right after each reveal, so the word overshoots to
       // (100 + bounce)% and settles back at 100%.
       const peak = 100 + (style.bounceScale != null ? style.bounceScale : 30);
@@ -406,14 +407,14 @@ const createCaptionLayer = (
         : style.animMode === "rotate" || style.animMode === "squash" || style.animMode === "wave"
         ? style.animMode
         : "none";
-    if (motion !== "none") {
+    if (!style.staticAnimation && motion !== "none") {
       try {
         addMotionAnimator(lyr, motion, times, style.size);
       } catch (eMotion) {
         // a motion AE can't apply on this build/font shouldn't cost the whole caption
       }
     }
-    if (style.reveal) {
+    if (!style.staticAnimation && style.reveal) {
       addWordAnimator(lyr, "Reveal (synced)", "ADBE Text Opacity", [0], exprHideUntilSpoken(times));
     }
     if (style.shadow) {
