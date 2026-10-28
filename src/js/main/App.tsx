@@ -24,7 +24,7 @@ import type {
   TranscriptWord,
 } from "../../shared/types";
 import { VIRAL_PRESETS, type ViralPreset } from "../../shared/presets";
-import { MOTION_OPTIONS, motionForAnimMode, type MotionType } from "../../shared/motion";
+import { MOTION_OPTIONS, isMotionType, motionForAnimMode, type MotionType } from "../../shared/motion";
 import { cssFontFor } from "../../shared/fonts";
 import {
   getCachedFonts,
@@ -291,7 +291,7 @@ export const AppContent = () => {
   // Handle Preset selection
   const applyPreset = (preset: ViralPreset) => {
     setSelectedPresetId(preset.id);
-    setMotionOverride(preset.motionOverride ?? null);
+    setMotionOverride(preset.motionOverride && isMotionType(preset.motionOverride) ? preset.motionOverride : null);
     if (preset.id.startsWith("custom-")) {
       setFontOverride(preset.font);
       saveFontOverride(preset.font);
