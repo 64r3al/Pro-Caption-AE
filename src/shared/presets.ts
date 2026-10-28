@@ -26,6 +26,8 @@ export interface ViralPreset {
   previewBgGradient: string;
   accentBadge: string;
   previewStyleClass: string;
+  /** Optional saved override for a user's custom preset; built-in presets omit this field. */
+  motionOverride?: string | null;
 }
 
 const CLASSIC_PRESETS: ViralPreset[] = [
