@@ -20,3 +20,42 @@ export const validateTranscriptWords = (
   }
   return out;
 };
+
+
+/**
+ * Normalizes Groq verbose_json response words. Real word-level timestamps take precedence;
+ * segment timestamps are only used when no usable word-level words were returned.
+ */
+export const normalizeTranscriptWords = (response: unknown): TranscriptWord[] => {
+  if (!response || typeof response !== "object") return [];
+  const data = response as { words?: unknown; segments?: unknown };
+
+  if (Array.isArray(data.words) && data.words.length) {
+    const wordLevel = validateTranscriptWords(
+      data.words.map((word: any) => ({
+        text: String(word?.word ?? ""),
+        start: Number(word?.start),
+        end: Number(word?.end),
+      }))
+    );
+    if (wordLevel.length) return wordLevel;
+  }
+
+  if (!Array.isArray(data.segments)) return [];
+  const fallback: TranscriptWord[] = [];
+  for (const segment of data.segments) {
+    const parts = String((segment as any)?.text ?? "").trim().split(/\s+/).filter(Boolean);
+    const start = Number((segment as any)?.start);
+    const end = Number((segment as any)?.end);
+    if (!parts.length || !Number.isFinite(start) || !Number.isFinite(end) || end < start) continue;
+    const durationPerWord = (end - start) / parts.length;
+    parts.forEach((text: string, index: number) => {
+      fallback.push({
+        text,
+        start: start + durationPerWord * index,
+        end: start + durationPerWord * (index + 1),
+      });
+    });
+  }
+  return validateTranscriptWords(fallback);
+};
