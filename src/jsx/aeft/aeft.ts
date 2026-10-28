@@ -317,114 +317,114 @@ const createCaptionLayer = (
   const aeText = group.text.replace(/\n/g, "\r");
   const lyr = comp.layers.addText(aeText);
   try {
-  const label = group.text.replace(/\r|\n/g, " ");
-  const numberPrefix = index < 10 ? "00" : index < 100 ? "0" : "";
-  lyr.name = "CAP " + numberPrefix + index + "  " + label.substr(0, 24);
+    const label = group.text.replace(/\r|\n/g, " ");
+    const numberPrefix = index < 10 ? "00" : index < 100 ? "0" : "";
+    lyr.name = "CAP " + numberPrefix + index + "  " + label.substr(0, 24);
 
-  const srcProp = p(p(lyr, "ADBE Text Properties"), "ADBE Text Document");
-  const doc: TextDocument = srcProp.value;
-  try {
-    doc.resetCharStyle();
-  } catch (e0) {
-    // not fatal - some AE versions/fonts don't support a full style reset
-  }
-  doc.text = aeText;
-  try {
-    doc.font = style.font;
-  } catch (e1) {
-    // invalid/missing PostScript font name - fall back to whatever font AE already picked
-  }
-  doc.fontSize = style.size;
-  doc.applyFill = true;
-  doc.fillColor = intToRgb(style.textColor);
-  if (style.strokeWidth > 0) {
-    doc.applyStroke = true;
-    doc.strokeColor = intToRgb(style.strokeColor);
-    doc.strokeWidth = style.strokeWidth;
-    doc.strokeOverFill = false;
-  } else {
-    doc.applyStroke = false;
-  }
-  doc.justification = ParagraphJustification.CENTER_JUSTIFY;
-  srcProp.setValue(doc);
-
-  lyr.inPoint = group.start;
-  lyr.outPoint = group.end;
-
-  // Word-based anchor grouping so per-word scale pops from each word's own center.
-  try {
-    p(p(lyr, "ADBE Text Properties"), "ADBE Text More Options")
-      .property("ADBE Text Anchor Point Option")
-      .setValue(2);
-  } catch (e2) {
-    // cosmetic only - pop animation still works, just anchored at the layer's default point
-  }
-
-  const transform = lyr.property("ADBE Transform Group");
-  p(transform, "ADBE Anchor Point").expression =
-    "var r=sourceRectAtTime(outPoint-thisComp.frameDuration,false);\n[r.left+r.width/2, r.top+r.height/2];";
-  // yOffset is authored against a 1920px-tall frame; scale it to this comp's height.
-  const yOffset = style.yOffset != null ? (style.yOffset * comp.height) / 1920 : 0;
-  p(transform, "ADBE Position").setValue([
-    comp.width / 2,
-    comp.height * POSITION_Y_FRACTIONS[style.posIndex] + yOffset,
-  ]);
-
-  const times = revealTimesFor(group, style.leadInFrames, comp.frameRate);
-  const endTimes: number[] = [];
-  for (let i = 0; i < group.words.length; i++) {
-    const nextStart = i + 1 < group.words.length ? group.words[i + 1].start : group.end;
-    endTimes.push(Math.min(group.end, Math.max(group.words[i].end, nextStart)));
-  }
-
-  if (style.highlight) {
-    const hc = intToRgb(style.highlightColor);
-    addWordAnimator(
-      lyr,
-      "Active Word",
-      "ADBE Text Fill Color",
-      [[hc[0], hc[1], hc[2], 1], hc],
-      exprActiveWord(times, endTimes)
-    );
-  }
-  if (style.pop) {
-    // The selector swings 0 -> ~100 -> 0 right after each reveal, so the word overshoots to
-    // (100 + bounce)% and settles back at 100%.
-    const peak = 100 + (style.bounceScale != null ? style.bounceScale : 30);
-    addWordAnimator(
-      lyr,
-      "Pop In",
-      "ADBE Text Scale 3D",
-      [[peak, peak, 100], [peak, peak]],
-      exprPop(times, 0.18)
-    );
-  }
-  // Older callers only sent animMode; the three modes they could animate map 1:1.
-  const motion =
-    style.motion != null
-      ? style.motion
-      : style.animMode === "rotate" || style.animMode === "squash" || style.animMode === "wave"
-      ? style.animMode
-      : "none";
-  if (motion !== "none") {
+    const srcProp = p(p(lyr, "ADBE Text Properties"), "ADBE Text Document");
+    const doc: TextDocument = srcProp.value;
     try {
-      addMotionAnimator(lyr, motion, times, style.size);
-    } catch (eMotion) {
-      // a motion AE can't apply on this build/font shouldn't cost the whole caption
+      doc.resetCharStyle();
+    } catch (e0) {
+      // not fatal - some AE versions/fonts don't support a full style reset
     }
-  }
-  if (style.reveal) {
-    addWordAnimator(lyr, "Reveal (synced)", "ADBE Text Opacity", [0], exprHideUntilSpoken(times));
-  }
-  if (style.shadow) {
+    doc.text = aeText;
     try {
-      const fx = p(lyr, "ADBE Effect Parade").addProperty("ADBE Drop Shadow");
-      p(fx, "ADBE Drop Shadow-0004").setValue(6);
-      p(fx, "ADBE Drop Shadow-0005").setValue(14);
-    } catch (e3) {
-      // drop shadow is cosmetic - skip it rather than fail the whole build
+      doc.font = style.font;
+    } catch (e1) {
+      // invalid/missing PostScript font name - fall back to whatever font AE already picked
     }
-  }
+    doc.fontSize = style.size;
+    doc.applyFill = true;
+    doc.fillColor = intToRgb(style.textColor);
+    if (style.strokeWidth > 0) {
+      doc.applyStroke = true;
+      doc.strokeColor = intToRgb(style.strokeColor);
+      doc.strokeWidth = style.strokeWidth;
+      doc.strokeOverFill = false;
+    } else {
+      doc.applyStroke = false;
+    }
+    doc.justification = ParagraphJustification.CENTER_JUSTIFY;
+    srcProp.setValue(doc);
+
+    lyr.inPoint = group.start;
+    lyr.outPoint = group.end;
+
+    // Word-based anchor grouping so per-word scale pops from each word's own center.
+    try {
+      p(p(lyr, "ADBE Text Properties"), "ADBE Text More Options")
+        .property("ADBE Text Anchor Point Option")
+        .setValue(2);
+    } catch (e2) {
+      // cosmetic only - pop animation still works, just anchored at the layer's default point
+    }
+
+    const transform = lyr.property("ADBE Transform Group");
+    p(transform, "ADBE Anchor Point").expression =
+      "var r=sourceRectAtTime(outPoint-thisComp.frameDuration,false);\n[r.left+r.width/2, r.top+r.height/2];";
+    // yOffset is authored against a 1920px-tall frame; scale it to this comp's height.
+    const yOffset = style.yOffset != null ? (style.yOffset * comp.height) / 1920 : 0;
+    p(transform, "ADBE Position").setValue([
+      comp.width / 2,
+      comp.height * POSITION_Y_FRACTIONS[style.posIndex] + yOffset,
+    ]);
+
+    const times = revealTimesFor(group, style.leadInFrames, comp.frameRate);
+    const endTimes: number[] = [];
+    for (let i = 0; i < group.words.length; i++) {
+      const nextStart = i + 1 < group.words.length ? group.words[i + 1].start : group.end;
+      endTimes.push(Math.min(group.end, Math.max(group.words[i].end, nextStart)));
+    }
+
+    if (style.highlight) {
+      const hc = intToRgb(style.highlightColor);
+      addWordAnimator(
+        lyr,
+        "Active Word",
+        "ADBE Text Fill Color",
+        [[hc[0], hc[1], hc[2], 1], hc],
+        exprActiveWord(times, endTimes)
+      );
+    }
+    if (style.pop) {
+      // The selector swings 0 -> ~100 -> 0 right after each reveal, so the word overshoots to
+      // (100 + bounce)% and settles back at 100%.
+      const peak = 100 + (style.bounceScale != null ? style.bounceScale : 30);
+      addWordAnimator(
+        lyr,
+        "Pop In",
+        "ADBE Text Scale 3D",
+        [[peak, peak, 100], [peak, peak]],
+        exprPop(times, 0.18)
+      );
+    }
+    // Older callers only sent animMode; the three modes they could animate map 1:1.
+    const motion =
+      style.motion != null
+        ? style.motion
+        : style.animMode === "rotate" || style.animMode === "squash" || style.animMode === "wave"
+        ? style.animMode
+        : "none";
+    if (motion !== "none") {
+      try {
+        addMotionAnimator(lyr, motion, times, style.size);
+      } catch (eMotion) {
+        // a motion AE can't apply on this build/font shouldn't cost the whole caption
+      }
+    }
+    if (style.reveal) {
+      addWordAnimator(lyr, "Reveal (synced)", "ADBE Text Opacity", [0], exprHideUntilSpoken(times));
+    }
+    if (style.shadow) {
+      try {
+        const fx = p(lyr, "ADBE Effect Parade").addProperty("ADBE Drop Shadow");
+        p(fx, "ADBE Drop Shadow-0004").setValue(6);
+        p(fx, "ADBE Drop Shadow-0005").setValue(14);
+      } catch (e3) {
+        // drop shadow is cosmetic - skip it rather than fail the whole build
+      }
+    }
   return lyr;
   } catch (error: any) {
     try {
@@ -526,13 +526,11 @@ export const buildCaptions = (
     const originalMessage = error && error.message ? error.message : String(error);
 
     if (precompItem) {
-      let parentLayerRemoved = false;
       for (let index = comp.numLayers; index >= 1; index--) {
         try {
           const parentLayer: any = comp.layer(index);
           if (parentLayer && parentLayer.source === precompItem) {
             parentLayer.remove();
-            parentLayerRemoved = true;
           }
         } catch (removeParentError: any) {
           cleanupErrors.push("could not remove the generated precomposition layer");
