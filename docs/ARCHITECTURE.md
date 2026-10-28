@@ -282,16 +282,11 @@ interface StoredSettings {
 5. **Vocabulary prompt token counting is a word-count approximation**, not the actual
    tokenizer Groq uses server-side, so the 224-token warning in the Transcribe tab is a
    rough guardrail, not an exact one.
-6. **Known, deliberately-not-fixed findings from the Step 0 audit** (reported in full then;
-   summarized here so they're not only in chat history): `ffmpeg.ts#findFfmpeg`'s `which()`
-   fallback uses a synchronous `execSync` (blocks the panel's own render thread briefly, not
-   After Effects itself); `groq.ts` reads the whole audio file synchronously and re-reads it
-   on every 429 retry; `SettingsTab.tsx`'s handlers have no try/catch, so a settings-file
-   write failure fails silently. (Switching tabs mid-transcription no longer loses work: the
-   job lives in `App.tsx`, and closing the panel cancels it and removes its temp audio.) None of these are
-   correctness bugs in the sync/caption-building logic Phase 2 added; they're pre-existing
-   Phase 1 robustness gaps, left as-is per the audit's scope (fix what the README's own test
-   checklist promises, report the rest).
+6. **Remaining Step 0 audit item:** `groq.ts` reads the full audio file synchronously and
+   re-reads it on each 429 retry. FFmpeg PATH lookup is asynchronous as of v1.4.1, and
+   SettingsTab now reports settings write failures. (Switching tabs mid-transcription does
+   not lose work: the job lives in `App.tsx`, and closing the panel cancels it and removes its
+   temporary audio.)
 
 ## Phase status
 
@@ -320,3 +315,15 @@ Automated CI verifies tests, type checking, lint/type checking, production build
 13. Check cancellation during transcription/retry and ensure temporary audio is cleaned up.
 
 This checklist is intentionally explicit: a green CI job is necessary, but it is not evidence that After Effects-only behavior has been manually confirmed.
+
+## v1.4.1 manual acceptance still required
+
+The v1.4.0 checklist still applies. In addition, verify these regression cases inside After Effects:
+
+1. Transcribe audio while the project is unsaved, save the project, edit words and timings, close and reopen the panel, and confirm the edits restore.
+2. Replace a source file with a different-size file at the same path and confirm the old transcript is not restored.
+3. Build grouped static captions and confirm the preview has no active-word color or scale change and matches the generated composition.
+4. Cause a settings write failure where safely possible and confirm the panel displays the error without clearing the user's input.
+5. Open Settings and analyze a waveform while FFmpeg is discoverable through PATH; confirm the panel remains responsive.
+
+The current environment does not include an After Effects installation. These checks remain a release limitation until completed on a supported host.

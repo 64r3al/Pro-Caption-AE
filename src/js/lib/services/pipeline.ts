@@ -53,7 +53,8 @@ export const transcribeSelection = (
   };
 
   const run = async (): Promise<TranscriptionOutcome> => {
-    const ffmpegPath = findFfmpeg();
+    const ffmpegPath = await findFfmpeg();
+    checkCancelled();
 
     if (ffmpegPath && info.sourceDurationSeconds > CHUNK_MAX_SECONDS) {
       const plan = planChunks(info.sourceDurationSeconds, CHUNK_MAX_SECONDS, CHUNK_OVERLAP_SECONDS);
@@ -158,7 +159,7 @@ export const refineWordTiming = async (
   audioPath: string | null
 ): Promise<TranscriptWord[]> => {
   if (!audioPath) return words;
-  const ffmpegPath = findFfmpeg();
+  const ffmpegPath = await findFfmpeg();
   if (!ffmpegPath) return words;
   return refineOnsets(ffmpegPath, audioPath, words, {
     windowSeconds: DEFAULT_SYNC_OPTIONS.onsetWindowSeconds,

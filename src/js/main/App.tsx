@@ -193,13 +193,13 @@ export const AppContent = () => {
       setSelection(info);
       setSelectionError(null);
       const recovered = loadRecoveredTranscript(info);
+      const previousLayer = transcribedLayer.current;
+      const sameSource = !!previousLayer && previousLayer.compId === info.compId &&
+        previousLayer.layerIndex === info.layerIndex &&
+        normalizeTranscriptRecoveryPath(previousLayer.sourceFilePath) === normalizeTranscriptRecoveryPath(info.sourceFilePath);
       if (recovered) {
-        const previousLayer = transcribedLayer.current;
-        const isSameSource = !!previousLayer && previousLayer.compId === info.compId &&
-          previousLayer.layerIndex === info.layerIndex &&
-          normalizeTranscriptRecoveryPath(previousLayer.sourceFilePath) === normalizeTranscriptRecoveryPath(info.sourceFilePath) &&
-          normalizeTranscriptRecoveryPath(previousLayer.projectFilePath || "") === normalizeTranscriptRecoveryPath(info.projectFilePath || "");
-        if (!isSameSource) {
+        const isSameProject = sameSource && normalizeTranscriptRecoveryPath(previousLayer!.projectFilePath || "") === normalizeTranscriptRecoveryPath(info.projectFilePath || "");
+        if (!isSameProject) {
           if (transcriptAudio.current.path && transcriptAudio.current.isTemp) {
             removeTempFile(transcriptAudio.current.path);
           }
@@ -216,6 +216,18 @@ export const AppContent = () => {
         setTranscriptRecoveryNotice(
           `Recovered ${recovered.words.length} words saved ${new Date(recovered.updatedAt).toLocaleString()}.`
         );
+      } else if (hasTranscript && sameSource && previousLayer && !previousLayer.projectFilePath && info.projectFilePath) {
+        // The user may save the AE project after transcribing an unsaved project. Attach the
+        // in-memory transcript to the newly available project identity so future edits recover.
+        transcribedLayer.current = info;
+        try {
+          const saved = saveRecoveredTranscript(info, activeWords, transcriptLanguage, isTranscriptEdited);
+          setTranscriptRecoveryNotice(saved
+            ? "Transcript is saved locally and will be restored for this project and layer."
+            : "Save the After Effects project to enable local transcript recovery.");
+        } catch {
+          setTranscriptRecoveryNotice("Local recovery could not be saved. Export the transcript as JSON to keep a backup.");
+        }
       }
       return info;
     } catch (err: any) {
@@ -297,7 +309,7 @@ export const AppContent = () => {
       setWaveformHeights(null);
       setWaveformStatus("Analyzing audio waveform…");
       try {
-        const ffmpegPath = findFfmpeg();
+        const ffmpegPath = await findFfmpeg();
         if (!ffmpegPath) {
           setWaveformStatus("FFmpeg is required to analyze the real waveform.");
           return;
@@ -1637,8 +1649,8 @@ export const AppContent = () => {
                                 key={`active-group-wrap-${globalIdx}`}
                                 className="relative inline-flex flex-col items-center justify-center"
                                 style={{
-                                  transform: `scale(${1 + bounceScale / 220})`,
-                                  transition: "transform 150ms ease-out",
+                                  transform: isStaticAnimation ? "none" : `scale(${1 + bounceScale / 220})`,
+                                  transition: isStaticAnimation ? "none" : "transform 150ms ease-out",
                                 }}
                               >
                                 <span
@@ -1693,7 +1705,9 @@ export const AppContent = () => {
                                       : "live-anim-pop")
                                   }`}
                                   style={{
-                                    color:
+                                    color: isStaticAnimation
+                                      ? currentPreset.animMode === "marker" ? "#111111" : baseColor
+                                      :
                                       currentPreset.animMode === "marker"
                                         ? "#111111"
                                         : currentPreset.animMode === "split-color"

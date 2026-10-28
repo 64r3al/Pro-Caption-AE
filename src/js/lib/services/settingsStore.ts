@@ -54,9 +54,19 @@ const writeSettings = (settings: StoredSettings): void => {
   assertNodeAvailable();
   const dir = getAppSettingsDir();
   ensureDir(dir);
-  fs.writeFileSync(path.join(dir, SETTINGS_FILE), JSON.stringify(settings, null, 2), {
-    mode: 0o600,
-  });
+  const file = path.join(dir, SETTINGS_FILE);
+  const temporaryFile = path.join(dir, SETTINGS_FILE + "." + Date.now() + ".tmp");
+  try {
+    fs.writeFileSync(temporaryFile, JSON.stringify(settings, null, 2), { mode: 0o600 });
+    fs.renameSync(temporaryFile, file);
+  } catch (error) {
+    try {
+      if (fs.existsSync(temporaryFile)) fs.unlinkSync(temporaryFile);
+    } catch {
+      // Preserve the original write/rename error.
+    }
+    throw error;
+  }
 };
 
 const encrypt = (plain: string): EncryptedBlob => {
