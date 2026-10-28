@@ -2,7 +2,7 @@
 
 Reliability, transcript editing, waveform analysis, and export improvements.
 
-- Adds a bounded request timeout to Groq transcription calls, defensive response normalization, bounded retry delays, and cancellation during retry backoff.
+- Adds a bounded request timeout to Groq transcription calls, defensive response normalization, tested exponential backoff, and cancellation during retry backoff. If the server requests a wait longer than the automatic retry window, the app does not retry earlier.
 - Validates word-level timestamps and uses validated segment-based timing only when usable word-level timestamps are unavailable.
 - Adds tests for malformed transcript data, waveform peak compression, subtitle formatting, custom-preset validation, preset render-support labels, and language handling.
 - Adds transcript word correction, insertion/deletion, and timestamp editing in the panel. Manual timing edits are preserved by skipping automatic onset refinement for edited transcripts.
