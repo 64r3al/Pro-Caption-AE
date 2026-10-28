@@ -147,7 +147,6 @@ export const TranscriptEditor = ({
     setDraftStart(String(start));
     setDraftEnd(String(end));
     setError(null);
-    onSelectWord?.(insertAt);
   };
 
   if (!rows.length) {
