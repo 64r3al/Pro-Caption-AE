@@ -18,15 +18,18 @@ export interface TranscriptRecoveryRecord {
   words: TranscriptWord[];
 }
 
-// Preserve case: macOS volumes can be case-sensitive, and folding paths here could
-// make two distinct projects share a recovery key.
-const normalizedPath = (value: string): string => value.replace(/\\/g, "/");
+/** Normalize separators everywhere and case-fold Windows drive/UNC paths only. */
+export const normalizeTranscriptRecoveryPath = (value: string): string => {
+  const normalized = value.replace(/\\/g, "/");
+  const isWindowsPath = /^[a-z]:\//i.test(normalized) || normalized.startsWith("//");
+  return isWindowsPath ? normalized.toLowerCase() : normalized;
+};
 
 /** Recovery is scoped to a saved AE project, composition, and selected source layer. */
 export const transcriptRecoveryKey = (info: SelectedAudioLayerInfo): string | null => {
   if (!info.projectFilePath || !info.projectFilePath.trim()) return null;
   return TRANSCRIPT_RECOVERY_PREFIX + [
-    encodeURIComponent(normalizedPath(info.projectFilePath)),
+    encodeURIComponent(normalizeTranscriptRecoveryPath(info.projectFilePath)),
     String(info.compId),
     String(info.layerIndex),
   ].join(":");
@@ -57,8 +60,8 @@ export const parseTranscriptRecovery = (
     const value: unknown = JSON.parse(raw);
     if (!isValidRecord(value)) return null;
     if (value.compId !== expected.compId || value.layerIndex !== expected.layerIndex) return null;
-    if (normalizedPath(value.projectFilePath) !== normalizedPath(expected.projectFilePath || "")) return null;
-    if (normalizedPath(value.sourceFilePath) !== normalizedPath(expected.sourceFilePath)) return null;
+    if (normalizeTranscriptRecoveryPath(value.projectFilePath) !== normalizeTranscriptRecoveryPath(expected.projectFilePath || "")) return null;
+    if (normalizeTranscriptRecoveryPath(value.sourceFilePath) !== normalizeTranscriptRecoveryPath(expected.sourceFilePath)) return null;
     return { ...value, words: validateTranscriptWords(value.words) };
   } catch {
     return null;

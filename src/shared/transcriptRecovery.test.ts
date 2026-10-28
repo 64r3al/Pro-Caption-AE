@@ -61,10 +61,14 @@ describe("transcript recovery", () => {
     expect(parseTranscriptRecovery(encoded, { ...layer, sourceFilePath: "C:/Media/other.wav" })).toBeNull();
   });
 
-  it("keeps case-distinct project paths separate on case-sensitive volumes", () => {
-    const otherCase = { ...layer, projectFilePath: "c:/Projects/short.aep" };
-    expect(transcriptRecoveryKey(otherCase)).not.toBe(transcriptRecoveryKey(layer));
-    expect(parseTranscriptRecovery(serializeTranscriptRecovery(record), otherCase)).toBeNull();
+  it("normalizes Windows case but keeps case-distinct POSIX paths separate", () => {
+    const windowsCase = { ...layer, projectFilePath: "c:/projects/SHORT.aep" };
+    expect(transcriptRecoveryKey(windowsCase)).toBe(transcriptRecoveryKey(layer));
+
+    const posixLayer = { ...layer, projectFilePath: "/Volumes/Work/short.aep" };
+    const otherCase = { ...posixLayer, projectFilePath: "/Volumes/work/short.aep" };
+    expect(transcriptRecoveryKey(otherCase)).not.toBe(transcriptRecoveryKey(posixLayer));
+    expect(parseTranscriptRecovery(serializeTranscriptRecovery({ ...record, projectFilePath: posixLayer.projectFilePath }), otherCase)).toBeNull();
   });
 
   it("rejects malformed and invalid word data", () => {

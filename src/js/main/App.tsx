@@ -39,6 +39,7 @@ import { TranscriptEditor } from "./features/TranscriptEditor";
 import { writeExportFile } from "../lib/services/export";
 import { loadCustomPresets, persistCustomPresets } from "../lib/services/customPresets";
 import { loadRecoveredTranscript, saveRecoveredTranscript } from "../lib/services/transcriptRecovery";
+import { normalizeTranscriptRecoveryPath } from "../../shared/transcriptRecovery";
 import { syncWords } from "../../shared/sync";
 import { buildGroups } from "../../shared/captions";
 import { formatSubtitles, type SubtitleFormat } from "../../shared/subtitles";
@@ -196,8 +197,8 @@ export const AppContent = () => {
         const previousLayer = transcribedLayer.current;
         const isSameSource = !!previousLayer && previousLayer.compId === info.compId &&
           previousLayer.layerIndex === info.layerIndex &&
-          previousLayer.sourceFilePath.replace(/\\/g, "/") === info.sourceFilePath.replace(/\\/g, "/") &&
-          previousLayer.projectFilePath?.replace(/\\/g, "/") === info.projectFilePath?.replace(/\\/g, "/");
+          normalizeTranscriptRecoveryPath(previousLayer.sourceFilePath) === normalizeTranscriptRecoveryPath(info.sourceFilePath) &&
+          normalizeTranscriptRecoveryPath(previousLayer.projectFilePath || "") === normalizeTranscriptRecoveryPath(info.projectFilePath || "");
         if (!isSameSource) {
           if (transcriptAudio.current.path && transcriptAudio.current.isTemp) {
             removeTempFile(transcriptAudio.current.path);
