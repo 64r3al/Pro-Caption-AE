@@ -98,6 +98,13 @@ export const AppContent = () => {
   const [waveformHeights, setWaveformHeights] = useState<number[] | null>(null);
   const [waveformStatus, setWaveformStatus] = useState("Select an audio layer to analyze its waveform.");
   const previewInfo = hasTranscript && transcribedLayer.current ? transcribedLayer.current : selection;
+  const waveformInfo = hasTranscript && transcribedLayer.current ? transcribedLayer.current : selection;
+  const waveformClipLeft = waveformInfo && previewDuration > 0
+    ? Math.max(0, Math.min(100, (waveformInfo.inPoint / previewDuration) * 100))
+    : 0;
+  const waveformClipWidth = waveformInfo && previewDuration > 0
+    ? Math.max(0, Math.min(100 - waveformClipLeft, ((waveformInfo.outPoint - waveformInfo.inPoint) / previewDuration) * 100))
+    : 100;
   const fallbackPreviewDuration = 42.5;
   const previewDuration =
     previewInfo?.compDuration && previewInfo.compDuration > 0 ? previewInfo.compDuration : fallbackPreviewDuration;
@@ -648,12 +655,12 @@ export const AppContent = () => {
           { fps: info.compFrameRate, offsetFrames: 0 }
         );
         const groups = buildGroups(synced, {
-          maxWords: 8,
-          maxCharsPerLine: 42,
-          maxLines: 2,
-          pauseBreakSeconds: 0.6,
-          holdSeconds: 0.25,
-          flickerGapSeconds: 0.6,
+          maxWords: wordsPerGroup,
+          maxCharsPerLine: DEFAULT_GROUPING_OPTIONS.maxCharsPerLine,
+          maxLines: DEFAULT_GROUPING_OPTIONS.maxLines,
+          pauseBreakSeconds: splitOnPauses ? DEFAULT_GROUPING_OPTIONS.pauseBreakSeconds : 999,
+          holdSeconds: DEFAULT_GROUPING_OPTIONS.holdSeconds,
+          flickerGapSeconds: DEFAULT_GROUPING_OPTIONS.flickerGapSeconds,
           fps: info.compFrameRate,
           compDuration: info.compDuration,
           uppercase: false,
@@ -1028,7 +1035,10 @@ export const AppContent = () => {
                 })}
 
                 {/* Real waveform peaks computed from the selected source audio. */}
-                <div className="w-full h-10 flex items-end justify-between gap-[1px] px-0.5 z-0 opacity-90">
+                <div
+                  className="absolute bottom-1 h-10 flex items-end justify-between gap-[1px] px-0.5 z-0 opacity-90 overflow-hidden"
+                  style={{ left: `${waveformClipLeft}%`, width: `${waveformClipWidth}%` }}
+                >
                   {waveformHeights && waveformHeights.length ? waveformHeights.map((height, idx) => {
                     const isHigh = height > 60;
                     return (
@@ -1233,7 +1243,7 @@ export const AppContent = () => {
               <div
                 className={`relative w-full ${
                   aspectRatio === "9:16"
-                    ? "aspect-[4/5]"
+                    ? "aspect-[9/16]"
                     : aspectRatio === "16:9"
                     ? "aspect-[16/9]"
                     : "aspect-square"
