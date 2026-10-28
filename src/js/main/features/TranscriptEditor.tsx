@@ -129,12 +129,30 @@ export const TranscriptEditor = ({
     const insertAt = selectedIndex == null ? words.length : selectedIndex + 1;
     const previous = insertAt > 0 ? words[insertAt - 1] : null;
     const next = insertAt < words.length ? words[insertAt] : null;
-    const start = previous && next
-      ? previous.start + Math.max(0, next.start - previous.start) / 2
-      : previous
-        ? previous.end
-        : 0;
-    const end = next ? Math.max(start, next.start) : start + 0.2;
+    let start: number;
+    let end: number;
+
+    if (previous && next) {
+      if (previous.end < next.start) {
+        // Prefer the quiet gap between neighboring words when there is one.
+        start = previous.end + (next.start - previous.end) / 2;
+      } else {
+        // If existing words overlap, keep the inserted start between their start times.
+        start = previous.start + Math.max(0, next.start - previous.start) / 2;
+      }
+      end = Math.min(start + 0.2, next.start);
+    } else if (previous) {
+      start = previous.end;
+      end = start + 0.2;
+    } else if (next) {
+      // Give a leading inserted word a short default duration instead of spanning the entire
+      // gap before the original first word.
+      end = next.start;
+      start = Math.max(0, end - 0.2);
+    } else {
+      start = 0;
+      end = 0.2;
+    }
     const nextWords = [
       ...words.slice(0, insertAt),
       { text, start, end },
