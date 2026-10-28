@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ViralPreset } from "../../../shared/presets";
 import type { PresetCategory } from "../../../shared/types";
+import { getPresetRenderSupport } from "../../../shared/presetCapabilities";
 
 interface PresetLibraryModalProps {
   isOpen: boolean;
@@ -100,6 +101,10 @@ export const PresetLibraryModal = ({
             )}
           </div>
 
+          <p className="text-[10px] leading-relaxed text-on-surface-variant" role="note">
+            Preview cards can include illustrative browser-only UI. Render support badges clarify whether a preset currently builds native shapes, native text motion, or a simplified text-based approximation.
+          </p>
+
           {/* Category Chips */}
           <div className="flex flex-wrap items-center gap-space-xs pt-1">
             {categories.map((cat) => {
@@ -145,6 +150,7 @@ export const PresetLibraryModal = ({
           ) : (
             filteredPresets.map((preset) => {
               const isSelected = activePresetId === preset.id;
+              const renderSupport = getPresetRenderSupport(preset.animMode);
               return (
                 <div
                   key={preset.id}
@@ -236,6 +242,12 @@ export const PresetLibraryModal = ({
                       <span className="bg-surface-container font-label-xs text-[8.5px] text-on-surface-variant px-1.5 py-0.5 rounded font-mono">
                         Bounce: {preset.bounceScale}%
                       </span>
+                      <span
+                        title={renderSupport.description}
+                        className={`font-label-xs text-[8.5px] px-1.5 py-0.5 rounded font-mono ${renderSupport.level === "native-shape" ? "bg-secondary/15 text-secondary" : renderSupport.level === "native-motion" ? "bg-primary/15 text-primary" : "bg-error/10 text-error"}`}
+                      >
+                        {renderSupport.label}
+                      </span>
                       <span className="bg-surface-container font-label-xs text-[8.5px] text-on-surface-variant px-1.5 py-0.5 rounded font-mono">
                         Size: {preset.fontSize}px
                       </span>
@@ -268,7 +280,7 @@ export const PresetLibraryModal = ({
         {/* Footer */}
         <div className="flex items-center justify-between px-space-md py-space-sm bg-surface-container-high border-t border-outline-variant/30">
           <span className="font-label-xs text-label-xs text-on-surface-variant">
-            All 50 presets automatically build native, keyframe-free After Effects Text Animators.
+            Built-in presets generate editable After Effects text with supported native animators and selected shape treatments. The badges above explain where complex preview effects are simplified in the rendered composition.
           </span>
           <button
             onClick={onClose}
