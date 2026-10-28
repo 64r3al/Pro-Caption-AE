@@ -53,9 +53,9 @@ const normalizeWords = (resp: any): TranscriptWord[] => {
   if (resp?.words?.length) {
     const wordLevel = validateTranscriptWords(
       resp.words.map((w: any) => ({
-        text: String(w.word ?? ""),
-        start: Number(w.start),
-        end: Number(w.end),
+        text: String(w?.word ?? ""),
+        start: Number(w?.start),
+        end: Number(w?.end),
       }))
     );
     if (wordLevel.length) return wordLevel;
@@ -64,9 +64,9 @@ const normalizeWords = (resp: any): TranscriptWord[] => {
   const fallback: TranscriptWord[] = [];
   if (resp?.segments) {
     for (const segment of resp.segments) {
-      const parts = String(segment.text ?? "").trim().split(/\s+/).filter(Boolean);
-      const start = Number(segment.start);
-      const end = Number(segment.end);
+      const parts = String(segment?.text ?? "").trim().split(/\s+/).filter(Boolean);
+      const start = Number(segment?.start);
+      const end = Number(segment?.end);
       if (!parts.length || !Number.isFinite(start) || !Number.isFinite(end) || end < start) continue;
       const durationPerWord = (end - start) / parts.length;
       parts.forEach((text: string, index: number) => {
@@ -97,7 +97,8 @@ export interface TranscribeHandle {
   cancel: () => void;
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const DEFAULT_RETRY_DELAY_MS = 1_000;
+const MAX_RETRY_DELAY_MS = 120_000;
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
@@ -193,6 +194,22 @@ export const transcribe = (filePath: string, opts: TranscribeOptions): Transcrib
   assertNodeAvailable();
   let cancelled = false;
   let activeReq: any = null;
+  let activeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let resolveRetryDelay: (() => void) | null = null;
+
+  const waitForRetry = (ms: number): Promise<void> =>
+    new Promise((resolve) => {
+      if (cancelled) {
+        resolve();
+        return;
+      }
+      resolveRetryDelay = resolve;
+      activeRetryTimer = setTimeout(() => {
+        activeRetryTimer = null;
+        resolveRetryDelay = null;
+        resolve();
+      }, ms);
+    });
 
   const run = async (): Promise<TranscriptResult> => {
     const maxRetries = opts.maxRetries ?? 3;
@@ -210,9 +227,11 @@ export const transcribe = (filePath: string, opts: TranscribeOptions): Transcrib
       if (cancelled) throw new Error("Cancelled.");
 
       if (result.status === 429 && attempt < maxRetries) {
-        const backoffMs = result.retryAfterMs ?? 1000 * Math.pow(2, attempt);
+        const exponentialDelay = DEFAULT_RETRY_DELAY_MS * Math.pow(2, attempt);
+        const requestedDelay = result.retryAfterMs ?? exponentialDelay;
+        const backoffMs = Math.min(MAX_RETRY_DELAY_MS, Math.max(0, requestedDelay));
         attempt++;
-        await sleep(backoffMs);
+        await waitForRetry(backoffMs);
         continue;
       }
 
@@ -248,6 +267,13 @@ export const transcribe = (filePath: string, opts: TranscribeOptions): Transcrib
     promise: run(),
     cancel: () => {
       cancelled = true;
+      if (activeRetryTimer !== null) {
+        clearTimeout(activeRetryTimer);
+        activeRetryTimer = null;
+      }
+      const resumeRetry = resolveRetryDelay;
+      resolveRetryDelay = null;
+      resumeRetry?.();
       try {
         activeReq?.destroy(new Error("Cancelled."));
       } catch {
