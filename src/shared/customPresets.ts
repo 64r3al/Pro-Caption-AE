@@ -1,4 +1,5 @@
 import type { ViralPreset } from "./presets";
+import { isMotionType } from "./motion";
 
 const STORAGE_SCHEMA_VERSION = 1;
 const MAX_CUSTOM_PRESETS = 100;
@@ -38,7 +39,7 @@ export const isValidCustomPreset = (value: unknown): value is ViralPreset => {
   if (typeof value.pop !== "boolean" || typeof value.shadow !== "boolean") return false;
   if (typeof value.font !== "string" || !value.font || value.font.length > 200) return false;
   if (typeof value.animMode !== "string" || value.animMode.length > 80) return false;
-  if (value.motionOverride !== undefined && value.motionOverride !== null && (typeof value.motionOverride !== "string" || value.motionOverride.length > 80)) return false;
+  if (value.motionOverride !== undefined && value.motionOverride !== null && !isMotionType(value.motionOverride)) return false;
   if (typeof value.previewBgGradient !== "string" || value.previewBgGradient.length > 200) return false;
   if (typeof value.accentBadge !== "string" || value.accentBadge.length > 200) return false;
   if (typeof value.previewStyleClass !== "string" || value.previewStyleClass.length > 200) return false;
