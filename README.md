@@ -61,12 +61,10 @@ Neither is included in a packaged build.
 
 ### Releasing
 
-Push a `v*` tag, or run the **Release ZXP** workflow from the Actions tab with a tag name. It
-builds and signs the ZXP on a Windows runner and attaches it to that GitHub release. See
-[docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for how the pieces fit together.
+The release workflow tests, builds, signs, and verifies the ZXP before publishing.
 
-## Built by IVX
+- To publish a new version automatically, merge the release-ready commit to `main`, then create/push a branch named exactly like the version tag (for example, `v1.3.0`). The workflow creates the matching tag and GitHub release. The branch and generated tag share a concurrency group to prevent a duplicate tag-triggered release run.
+- You can also run **Release ZXP** from the Actions tab with a tag name.
+- The version in `package.json` and `package-lock.json` must match the requested tag version (for example, `1.3.0` for `v1.3.0`).
 
-I build creative tools that connect editing, motion design, VFX and software.
-
-[GitHub](https://github.com/64r3al) · [More projects](https://github.com/64r3al?tab=repositories)
+See `docs/ARCHITECTURE.md` for how the pieces fit together.

@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Type-check panel and host code
+        run: npm run typecheck
+
+      - name: Run lint/type check
+        run: npm run lint
+
+      - name: Build production panel
+        run: npm run build
+
+      - name: Validate compiled ExtendScript output
+        shell: bash
+        run: |
+          node -e "const fs=require('node:fs'); const p='dist/cep/jsx/index.js'; if(!fs.existsSync(p)) throw new Error('Expected compiled ExtendScript output is missing: '+p); const s=fs.readFileSync(p,'utf8'); if(/\\bprocess\\.env\\b/.test(s)) throw new Error('Compiled ExtendScript contains process.env, which is unavailable in the After Effects host.'); console.log('Compiled ExtendScript output looks structurally valid.');"

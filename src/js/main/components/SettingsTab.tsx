@@ -54,17 +54,25 @@ export const SettingsTab = () => {
   };
 
   const handleTest = async () => {
-    const { key } = resolveApiKey();
-    const candidate = keyInput.trim() || key;
-    if (!candidate) {
-      setTestResult({ ok: false, message: "Enter an API key first." });
-      return;
-    }
     setTesting(true);
     setTestResult(null);
-    const result = await testApiKey(candidate);
-    setTesting(false);
-    setTestResult({ ok: result.ok, message: result.message });
+    try {
+      const { key } = resolveApiKey();
+      const candidate = keyInput.trim() || key;
+      if (!candidate) {
+        setTestResult({ ok: false, message: "Enter an API key first." });
+        return;
+      }
+      const result = await testApiKey(candidate);
+      setTestResult({ ok: result.ok, message: result.message });
+    } catch (err: any) {
+      setTestResult({
+        ok: false,
+        message: err?.message || "Could not test the API key. Check the extension settings and try again.",
+      });
+    } finally {
+      setTesting(false);
+    }
   };
 
   const handleLocateFfmpeg = async () => {

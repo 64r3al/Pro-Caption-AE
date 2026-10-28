@@ -1,16 +1,13 @@
-## Pro Caption AE
+## Pro Caption AE v1.3.0
 
-AI transcription and animated, word-synced captions for Adobe After Effects, powered by Groq Whisper.
+Reliability and release-quality improvements.
 
-- Transcribe the selected audio layer with word-level timestamps (long clips are chunked automatically)
-- 66 presets and 15 real After Effects motion types, with a live preview
-- Use any font installed on your machine
-- Builds editable, frame-accurate text layers in a precomp, in one undo step
+- Adds a bounded request timeout for Groq transcription calls.
+- Validates word-level transcription timestamps and uses a validated segment fallback when needed.
+- Adds tests for malformed transcript timing and whitespace handling.
+- Improves API-key test error handling so the Settings panel does not remain stuck in a loading state.
+- Adds preflight validation to caption generation and best-effort rollback of generated layers/precompositions when a build fails.
+- Adds Windows CI for tests, type checks, production builds, and compiled ExtendScript checks.
+- Updates the release toolchain to Node.js 24 and verifies that the package version matches the requested release tag.
 
-### Install
-1. Download `Pro-Caption-AE_<version>.zxp` below.
-2. Install it with the free [ZXP/UXP Installer](https://aescripts.com/learn/zxp-installer/) (drag the file onto the installer window).
-3. Restart After Effects and open **Window → Extensions → Pro Caption AE**.
-4. Open Settings (gear icon) and add your [Groq API key](https://console.groq.com/keys).
-
-Requires After Effects 2024 (v24) or newer and FFmpeg installed. See [INSTALLATION.md](https://github.com/64r3al/Pro-Caption-AE/blob/main/INSTALLATION.md) for details.
+Requires After Effects 2024 (v24) or newer and FFmpeg. See [INSTALLATION.md](https://github.com/64r3al/Pro-Caption-AE/blob/main/INSTALLATION.md) for details.

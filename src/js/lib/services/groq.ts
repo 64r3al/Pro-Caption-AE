@@ -2,6 +2,7 @@ import { crypto, fs, https } from "../cep/node";
 import { assertNodeAvailable } from "./env";
 import { GROQ_TRANSCRIPTION_URL } from "../../../shared/constants";
 import type { GroqModel, TranscriptResult, TranscriptWord } from "../../../shared/types";
+import { validateTranscriptWords } from "../../../shared/transcriptValidation";
 
 // We build the multipart/form-data body by hand instead of pulling in the npm `form-data`
 // package the master prompt's reference snippet uses: CEP's Node module resolution only sees
@@ -49,29 +50,35 @@ const buildMultipartBody = (
 // Groq verbose_json -> flat word list. Falls back to spreading words evenly across each
 // segment when word-level timestamps aren't returned (ported from the ScriptUI prototype).
 const normalizeWords = (resp: any): TranscriptWord[] => {
-  const out: TranscriptWord[] = [];
   if (resp?.words?.length) {
-    for (const w of resp.words) {
-      const text = String(w.word ?? "").trim();
-      if (!text) continue;
-      out.push({ text, start: Number(w.start), end: Number(w.end) });
-    }
-    return out;
+    const wordLevel = validateTranscriptWords(
+      resp.words.map((w: any) => ({
+        text: String(w.word ?? ""),
+        start: Number(w.start),
+        end: Number(w.end),
+      }))
+    );
+    if (wordLevel.length) return wordLevel;
   }
+
+  const fallback: TranscriptWord[] = [];
   if (resp?.segments) {
-    for (const sg of resp.segments) {
-      const parts = String(sg.text ?? "")
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean);
-      if (!parts.length) continue;
-      const d = (sg.end - sg.start) / parts.length;
-      parts.forEach((word: string, i: number) => {
-        out.push({ text: word, start: sg.start + d * i, end: sg.start + d * (i + 1) });
+    for (const segment of resp.segments) {
+      const parts = String(segment.text ?? "").trim().split(/\s+/).filter(Boolean);
+      const start = Number(segment.start);
+      const end = Number(segment.end);
+      if (!parts.length || !Number.isFinite(start) || !Number.isFinite(end) || end < start) continue;
+      const durationPerWord = (end - start) / parts.length;
+      parts.forEach((text: string, index: number) => {
+        fallback.push({
+          text,
+          start: start + durationPerWord * index,
+          end: start + durationPerWord * (index + 1),
+        });
       });
     }
   }
-  return out;
+  return validateTranscriptWords(fallback);
 };
 
 export interface TranscribeOptions {
@@ -81,6 +88,8 @@ export interface TranscribeOptions {
   prompt?: string;
   /** Retries left on HTTP 429 before giving up. */
   maxRetries?: number;
+  /** Maximum wall-clock duration for one transcription HTTP request. Defaults to 120 seconds. */
+  timeoutMs?: number;
 }
 
 export interface TranscribeHandle {
@@ -89,6 +98,8 @@ export interface TranscribeHandle {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
 const postOnce = (
   filePath: string,
@@ -113,6 +124,19 @@ const postOnce = (
       data: fs.readFileSync(filePath),
     });
 
+    const timeoutMs =
+      opts.timeoutMs != null && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
+        ? opts.timeoutMs
+        : DEFAULT_REQUEST_TIMEOUT_MS;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const clearRequestTimeout = () => {
+      if (timeout !== null) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+    };
+
     const url = new URL(GROQ_TRANSCRIPTION_URL);
     const req = https.request(
       {
@@ -129,15 +153,33 @@ const postOnce = (
         let responseBody = "";
         res.on("data", (chunk: Buffer) => (responseBody += chunk));
         res.on("end", () => {
+          clearRequestTimeout();
           const retryAfterHeader = res.headers["retry-after"];
-          const retryAfterMs = retryAfterHeader
-            ? Number(retryAfterHeader) * 1000
-            : null;
+          const retryAfterSeconds =
+            retryAfterHeader == null ? Number.NaN : Number(retryAfterHeader);
+          const retryAfterMs =
+            Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
+              ? retryAfterSeconds * 1000
+              : null;
           resolve({ status: res.statusCode || 0, body: responseBody, retryAfterMs });
+        });
+        res.on("error", (err: Error) => {
+          clearRequestTimeout();
+          reject(err);
         });
       }
     );
-    req.on("error", (err: Error) => reject(err));
+
+    timeout = setTimeout(() => {
+      req.destroy(
+        new Error(`Groq transcription request timed out after ${Math.round(timeoutMs / 1000)} seconds.`)
+      );
+    }, timeoutMs);
+
+    req.on("error", (err: Error) => {
+      clearRequestTimeout();
+      reject(err);
+    });
     onRequest(req);
     req.write(body);
     req.end();
