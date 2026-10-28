@@ -442,6 +442,129 @@ const createCaptionLayer = (
   }
 };
 
+interface PresetDecorationConfig {
+  kind: "background" | "underline" | "marker";
+  color: number;
+  opacity: number;
+  paddingX: number;
+  paddingY: number;
+  radius: number;
+}
+
+const getPresetDecorationConfig = (style: CaptionStyle): PresetDecorationConfig | null => {
+  const mode = style.animMode || "";
+  if (mode === "underline") {
+    return {
+      kind: "underline",
+      color: style.highlightColor,
+      opacity: 100,
+      paddingX: 14,
+      paddingY: 5,
+      radius: 2,
+    };
+  }
+  if (mode === "marker") {
+    return {
+      kind: "marker",
+      color: style.highlightColor,
+      opacity: 48,
+      paddingX: 12,
+      paddingY: 1,
+      radius: 2,
+    };
+  }
+
+  // Native AE rectangle treatments for card-style presets. These are deliberately simple,
+  // editable shape layers; the UI must not imply that browser-only icons/chrome are reproduced.
+  if (mode === "sticker") return { kind: "background", color: 0xffffff, opacity: 100, paddingX: 30, paddingY: 20, radius: 10 };
+  if (mode === "sticky-note") return { kind: "background", color: 0xffe47a, opacity: 100, paddingX: 34, paddingY: 24, radius: 2 };
+  if (mode === "blur-box") return { kind: "background", color: 0x16181d, opacity: 88, paddingX: 28, paddingY: 16, radius: 12 };
+  if (mode === "terminal") return { kind: "background", color: 0x06150d, opacity: 96, paddingX: 34, paddingY: 22, radius: 6 };
+  if (mode === "search-bar") return { kind: "background", color: 0x202124, opacity: 100, paddingX: 36, paddingY: 20, radius: 24 };
+  if (mode === "reddit") return { kind: "background", color: 0x1a1a1b, opacity: 96, paddingX: 30, paddingY: 18, radius: 8 };
+  if (mode === "tweet") return { kind: "background", color: 0x050505, opacity: 94, paddingX: 30, paddingY: 18, radius: 10 };
+  if (mode === "quote") return { kind: "background", color: 0x242424, opacity: 92, paddingX: 36, paddingY: 26, radius: 8 };
+  if (mode === "stat-card") return { kind: "background", color: 0x111827, opacity: 96, paddingX: 36, paddingY: 24, radius: 12 };
+  if (mode === "newspaper") return { kind: "background", color: 0xf1e8d4, opacity: 100, paddingX: 32, paddingY: 22, radius: 0 };
+  if (mode === "callout") return { kind: "background", color: 0x11233a, opacity: 94, paddingX: 28, paddingY: 18, radius: 8 };
+  if (mode === "timeline") return { kind: "background", color: 0x12243a, opacity: 92, paddingX: 24, paddingY: 16, radius: 6 };
+  if (mode === "chapter") return { kind: "background", color: 0x0b0b0d, opacity: 90, paddingX: 36, paddingY: 26, radius: 0 };
+  if (mode === "stamp") return { kind: "background", color: 0x3a2020, opacity: 90, paddingX: 24, paddingY: 14, radius: 1 };
+  if (mode === "diary") return { kind: "background", color: 0xf0e3c8, opacity: 100, paddingX: 34, paddingY: 22, radius: 2 };
+  if (mode === "collage") return { kind: "background", color: 0xf7f4eb, opacity: 100, paddingX: 26, paddingY: 22, radius: 4 };
+  if (mode === "hologram") return { kind: "background", color: 0x062b32, opacity: 58, paddingX: 26, paddingY: 18, radius: 4 };
+  return null;
+};
+
+/** Builds editable native shape treatments for presets that call for a box, marker, or underline.
+ * The shape follows the text layer's position and shares its in/out points, so the decoration
+ * remains synchronized when the generated caption composition is moved or trimmed. */
+const createPresetDecorationLayer = (
+  comp: CompItem,
+  textLayer: TextLayer,
+  group: CaptionGroupData,
+  index: number,
+  style: CaptionStyle
+): ShapeLayer | null => {
+  const config = getPresetDecorationConfig(style);
+  if (!config) return null;
+
+  const shape = comp.layers.addShape();
+  try {
+    const bounds = (textLayer as any).sourceRectAtTime(group.start, false);
+    const measuredWidth = bounds && isFinite(bounds.width) ? Math.max(1, bounds.width) : Math.max(1, style.size * group.text.length * 0.55);
+    const measuredHeight = bounds && isFinite(bounds.height) ? Math.max(1, bounds.height) : Math.max(1, style.size * 1.2);
+    let width = measuredWidth + config.paddingX * 2;
+    let height = measuredHeight + config.paddingY * 2;
+    let offsetY = 0;
+
+    if (config.kind === "underline") {
+      height = Math.max(3, style.size * 0.055);
+      offsetY = measuredHeight / 2 + Math.max(2, config.paddingY);
+    } else if (config.kind === "marker") {
+      height = Math.max(8, measuredHeight * 0.55 + config.paddingY * 2);
+      offsetY = measuredHeight * 0.12;
+    }
+
+    const root = p(shape, "ADBE Root Vectors Group");
+    const groupVectors = root.addProperty("ADBE Vector Group");
+    groupVectors.name = "Caption Decoration " + index;
+    const vectors = p(groupVectors, "ADBE Vectors Group");
+    const rectangle = vectors.addProperty("ADBE Vector Shape - Rect");
+    p(rectangle, "ADBE Vector Rect Size").setValue([width, height]);
+    p(rectangle, "ADBE Vector Rect Position").setValue([0, offsetY]);
+    p(rectangle, "ADBE Vector Rect Roundness").setValue(config.radius);
+    const fill = vectors.addProperty("ADBE Vector Graphic - Fill");
+    p(fill, "ADBE Vector Fill Color").setValue(intToRgb(config.color));
+    p(fill, "ADBE Vector Fill Opacity").setValue(config.opacity);
+
+    const yOffset = style.yOffset != null ? (style.yOffset * comp.height) / 1920 : 0;
+    p(shape, "ADBE Transform Group").property("ADBE Position").setValue([
+      comp.width / 2,
+      comp.height * POSITION_Y_FRACTIONS[style.posIndex] + yOffset,
+    ]);
+    shape.name = "CAP DECOR " + (index < 10 ? "00" : index < 100 ? "0" : "") + index;
+    shape.inPoint = group.start;
+    shape.outPoint = group.end;
+    // Put the shape behind generated text. Only the generated layers are later precomposed.
+    shape.moveToEnd();
+    return shape;
+  } catch (error: any) {
+    try {
+      shape.remove();
+    } catch (cleanupError: any) {
+      const originalMessage = error && error.message ? error.message : String(error);
+      const cleanupMessage = cleanupError && cleanupError.message ? cleanupError.message : String(cleanupError);
+      throw new Error(
+        "Preset decoration creation failed: " + originalMessage +
+        ". Automatic cleanup failed: " + cleanupMessage +
+        ". Please inspect the composition before continuing."
+      );
+    }
+    throw error;
+  }
+};
+
 /** Builds every caption layer and precomposes them, in one undo step. `groups` must already
  * be fully computed (comp-time, frame-quantized, grouped) by the panel - see
  * src/shared/sync.ts and src/shared/captions.ts - so this function is pure AE-object-model
@@ -510,12 +633,15 @@ export const buildCaptions = (
 
   const precompName = "Captions - " + comp.name;
   const originalProjectItemCount = app.project.numItems;
-  const layers: TextLayer[] = [];
+  const layers: any[] = [];
   let precompItem: any = null;
   app.beginUndoGroup("Pro Caption AE");
   try {
     for (let i = 0; i < groups.length; i++) {
-      layers.push(createCaptionLayer(comp, groups[i], i + 1, style));
+      const textLayer = createCaptionLayer(comp, groups[i], i + 1, style);
+      layers.push(textLayer);
+      const decorationLayer = createPresetDecorationLayer(comp, textLayer, groups[i], i + 1, style);
+      if (decorationLayer) layers.push(decorationLayer);
     }
     const indices: number[] = [];
     for (let j = 0; j < layers.length; j++) indices.push(layers[j].index);
