@@ -5,7 +5,7 @@ import type { TranscriptWord } from "../../../shared/types";
 
 export interface TranscriptEditorProps {
   words: TranscriptWord[];
-  onChange: (words: TranscriptWord[]) => void;
+  onChange: (words: TranscriptWord[], focusIndex?: number) => void;
   onSelectWord?: (index: number) => void;
   activeWordIndex?: number;
   disabled?: boolean;
@@ -97,7 +97,10 @@ export const TranscriptEditor = ({
       setError("This word cannot start after the following word.");
       return;
     }
-    onChange(words.map((word, index) => index === selectedIndex ? { text, start, end } : word));
+    onChange(
+      words.map((word, index) => index === selectedIndex ? { text, start, end } : word),
+      selectedIndex
+    );
     setDraftText(text);
     setDraftStart(String(start));
     setDraftEnd(String(end));
@@ -111,7 +114,7 @@ export const TranscriptEditor = ({
       return;
     }
     const nextWords = words.filter((_word, index) => index !== selectedIndex);
-    onChange(nextWords);
+    onChange(nextWords, Math.max(0, selectedIndex - 1));
     setSelectedIndex(null);
     setDraftText("");
     setDraftStart("");
@@ -158,7 +161,7 @@ export const TranscriptEditor = ({
       { text, start, end },
       ...words.slice(insertAt),
     ];
-    onChange(nextWords);
+    onChange(nextWords, insertAt);
     setNewWordText("");
     setSelectedIndex(insertAt);
     setDraftText(text);
