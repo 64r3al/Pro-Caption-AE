@@ -27,27 +27,28 @@ export const CaptionPreviewCanvas = ({ style }: CaptionPreviewCanvasProps) => {
   const inView = useInView(frameRef);
   const frameWidth = useElementWidth(frameRef);
   const [activeIndex, setActiveIndex] = useState(0);
+  const isStatic = style.staticAnimation === true;
 
   useEffect(() => {
-    if (!inView || prefersReducedMotion()) return;
+    if (isStatic || !inView || prefersReducedMotion()) return;
     const id = window.setInterval(() => {
       setActiveIndex((i) => (i + 1) % SAMPLE_WORDS.length);
     }, WORD_INTERVAL_MS);
     return () => window.clearInterval(id);
-  }, [inView]);
+  }, [inView, isStatic]);
 
   const scale = frameWidth ? frameWidth / REFERENCE_COMP_WIDTH : 0;
   const fontSize = style.size * scale;
   const strokeWidth = style.strokeWidth * scale;
   const topPercent = POSITION_Y_FRACTIONS[style.posIndex] * 100;
 
-  const visibleWords = style.reveal ? SAMPLE_WORDS.slice(0, activeIndex + 1) : SAMPLE_WORDS;
+  const visibleWords = !isStatic && style.reveal ? SAMPLE_WORDS.slice(0, activeIndex + 1) : SAMPLE_WORDS;
 
   return (
     <div className="gc-preview-frame" ref={frameRef}>
       <div className="gc-preview-caption-row" style={{ top: `${topPercent}%` }}>
         {visibleWords.map((word, i) => {
-          const isActive = i === activeIndex;
+          const isActive = !isStatic && i === activeIndex;
           return (
             <span
               key={`${word}-${i}`}

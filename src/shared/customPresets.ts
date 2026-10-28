@@ -40,6 +40,8 @@ export const isValidCustomPreset = (value: unknown): value is ViralPreset => {
   if (typeof value.font !== "string" || !value.font || value.font.length > 200) return false;
   if (typeof value.animMode !== "string" || value.animMode.length > 80) return false;
   if (value.motionOverride !== undefined && value.motionOverride !== null && !isMotionType(value.motionOverride)) return false;
+  if (value.staticAnimation !== undefined && typeof value.staticAnimation !== "boolean") return false;
+  if (value.strokeEnabled !== undefined && typeof value.strokeEnabled !== "boolean") return false;
   if (typeof value.previewBgGradient !== "string" || value.previewBgGradient.length > 200) return false;
   if (typeof value.accentBadge !== "string" || value.accentBadge.length > 200) return false;
   if (typeof value.previewStyleClass !== "string" || value.previewStyleClass.length > 200) return false;

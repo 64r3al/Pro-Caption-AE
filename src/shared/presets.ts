@@ -28,6 +28,10 @@ export interface ViralPreset {
   previewStyleClass: string;
   /** Optional saved override for a user's custom preset; built-in presets omit this field. */
   motionOverride?: string | null;
+  /** Optional saved override for the explicit no-animation output mode. */
+  staticAnimation?: boolean;
+  /** Optional saved override for turning off a preset's default outline. */
+  strokeEnabled?: boolean;
 }
 
 const CLASSIC_PRESETS: ViralPreset[] = [

@@ -186,3 +186,14 @@
 .gc-source-meta strong {
   color: var(--gc-text-primary);
 }
+
+// Static captions keep the selected preset's appearance while disabling all preview motion.
+.gc-static-caption-preview .live-anim-node,
+.gc-static-caption-preview [class*="live-anim-"],
+.gc-static-caption-preview [class*="animate-"] {
+  animation: none !important;
+  transition: none !important;
+  transform: none !important;
+  filter: none !important;
+  opacity: 1 !important;
+}

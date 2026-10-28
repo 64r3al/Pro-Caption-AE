@@ -33,6 +33,15 @@ If it is installed somewhere else, set its path in the panel's Settings.
 
 The key is stored locally on your machine, per user.
 
+## Using captions without motion or outlines
+
+- In the style controls, choose **None (Static)** for plain text captions. The caption layers remain timed to the spoken words, but do not use reveal, highlight, pop, or text-motion animation.
+- Turn off **Text Stroke** to remove the outline from a preset that has one. Presets without an outline have no stroke to remove.
+
+## Transcript recovery
+
+For a saved After Effects project, the panel stores the transcript and manual word/timing edits locally and can restore them for the matching project path, composition, selected layer, and source media. Recovery data stays in this machine's panel profile; it is not written inside the `.aep` project or synced to other machines. Save the project before transcription and export JSON when you need a portable backup.
+
 ## Troubleshooting
 
 - **Panel missing from Window → Extensions:** fully quit and reopen After Effects, and confirm you are on v24 or newer.

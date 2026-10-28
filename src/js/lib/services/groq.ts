@@ -4,6 +4,7 @@ import { GROQ_TRANSCRIPTION_URL } from "../../../shared/constants";
 import type { GroqModel, TranscriptResult } from "../../../shared/types";
 import { normalizeTranscriptWords } from "../../../shared/transcriptValidation";
 import { computeRetryDelayMs } from "../../../shared/retry";
+import { safeUploadFilename } from "../../../shared/uploadFilename";
 
 // We build the multipart/form-data body by hand instead of pulling in the npm `form-data`
 // package the master prompt's reference snippet uses: CEP's Node module resolution only sees
@@ -91,7 +92,7 @@ const postOnce = (
 
     const { body, boundary } = buildMultipartBody(fields, {
       name: "file",
-      filename: filePath.split(/[\\/]/).pop() || "audio",
+      filename: safeUploadFilename(filePath),
       contentType: "application/octet-stream",
       data: fs.readFileSync(filePath),
     });

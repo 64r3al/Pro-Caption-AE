@@ -54,6 +54,14 @@ describe("custom preset storage", () => {
     }))).toEqual([validPreset]);
   });
 
+  it("round-trips static animation and explicit no-stroke choices", () => {
+    const preset = { ...validPreset, staticAnimation: true, strokeEnabled: false };
+    expect(isValidCustomPreset(preset)).toBe(true);
+    expect(parseCustomPresetStorage(serializeCustomPresetStorage([preset]))).toEqual([preset]);
+    expect(isValidCustomPreset({ ...preset, staticAnimation: "yes" })).toBe(false);
+    expect(isValidCustomPreset({ ...preset, strokeEnabled: 0 })).toBe(false);
+  });
+
   it("caps the stored collection at 100 presets", () => {
     const presets = Array.from({ length: 105 }, (_value, index) => ({
       ...validPreset,
