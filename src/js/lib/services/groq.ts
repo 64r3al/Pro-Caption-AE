@@ -3,6 +3,7 @@ import { assertNodeAvailable } from "./env";
 import { GROQ_TRANSCRIPTION_URL } from "../../../shared/constants";
 import type { GroqModel, TranscriptResult } from "../../../shared/types";
 import { normalizeTranscriptWords } from "../../../shared/transcriptValidation";
+import { computeRetryDelayMs } from "../../../shared/retry";
 
 // We build the multipart/form-data body by hand instead of pulling in the npm `form-data`
 // package the master prompt's reference snippet uses: CEP's Node module resolution only sees
@@ -197,12 +198,17 @@ export const transcribe = (filePath: string, opts: TranscribeOptions): Transcrib
       if (cancelled) throw new Error("Cancelled.");
 
       if (result.status === 429 && attempt < maxRetries) {
-        const exponentialDelay = DEFAULT_RETRY_DELAY_MS * Math.pow(2, attempt);
-        const requestedDelay = result.retryAfterMs ?? exponentialDelay;
-        const backoffMs = Math.min(MAX_RETRY_DELAY_MS, Math.max(0, requestedDelay));
-        attempt++;
-        await waitForRetry(backoffMs);
-        continue;
+        const backoffMs = computeRetryDelayMs(
+          attempt,
+          result.retryAfterMs,
+          DEFAULT_RETRY_DELAY_MS,
+          MAX_RETRY_DELAY_MS
+        );
+        if (backoffMs !== null) {
+          attempt++;
+          await waitForRetry(backoffMs);
+          continue;
+        }
       }
 
       let parsed: any;
@@ -218,7 +224,10 @@ export const transcribe = (filePath: string, opts: TranscribeOptions): Transcrib
           message += "\n\nYour API key is invalid or revoked. Paste a new one in Settings.";
         }
         if (result.status === 429) {
-          message += "\n\nFree-tier rate limit reached. Wait a bit and try again.";
+          message += "\n\nRate limit reached. Wait before trying again.";
+          if (result.retryAfterMs !== null && result.retryAfterMs > MAX_RETRY_DELAY_MS) {
+            message += "\nThe server requested a longer wait than the automatic retry window; the app did not retry early.";
+          }
         }
         throw new Error(message);
       }
