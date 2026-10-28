@@ -150,6 +150,12 @@ interface CaptionStyle {
   posIndex: 0 | 1 | 2 | 3;  // Bottom / Lower third / Center / Top
   reveal: boolean; highlight: boolean; pop: boolean; shadow: boolean;
   leadInFrames: number;
+  animMode?: string;
+  rotationDeg?: number;
+  trackingAmount?: number;
+  bounceScale?: number;
+  yOffset?: number;
+  motion?: string;
 }
 ```
 
@@ -157,13 +163,13 @@ interface CaptionStyle {
 
 The master prompt's "performance-first" comp-building idea — one text layer driven by
 `footage("captions.json").sourceData` plus Expression Selectors, rather than one text layer
-per caption — is real and worth doing, but Phase 2 builds N discrete precomposed text
-layers instead (closer to `Groq_Captions.jsx`'s original design). Deliberately deferred
-rather than built speculatively: the whole point of the JSON-driven approach is "edit a
-word/timing and the comp updates without a rebuild," which only pays off when the editor also persists edits and can rebuild its generated composition reliably. Building it now would mean guessing at the
-editor's needs; building it alongside the editor means the file shape is driven by what the
-editor actually needs to read and write. "Bake to layers" (today's Phase 2 behavior) stays
-available either way as an explicit option for manual per-layer tweaking outside the editor.
+per caption — remains a future optimization. The v1.3.0 transcript editor currently holds its
+working transcript in panel state and rebuilds the generated composition when requested; it
+does not yet persist edits into a project-backed data source or update one data-driven text
+layer live. Implementing the compact approach must be preceded by a prototype and benchmarks
+that demonstrate reliable editing, word-level timing, style changes, and project reopening.
+The existing separate-layer output remains the compatible editable mode until such a prototype
+passes After Effects integration tests.
 
 ### Settings (`settingsStore.ts`, per-OS user profile dir, not in the repo)
 
