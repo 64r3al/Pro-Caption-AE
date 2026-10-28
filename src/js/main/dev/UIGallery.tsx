@@ -220,8 +220,8 @@ export const UIGallery = () => {
           </div>
         </GallerySection>
 
-        <GallerySection title="Waveform (decorative)">
-          <WaveformPreview seed="interview_raw.wav" />
+        <GallerySection title="Waveform preview (sample data)">
+          <WaveformPreview heights={[12, 22, 18, 65, 80, 34, 45, 98, 72, 40, 28, 60, 16, 22, 85, 56]} />
         </GallerySection>
 
         <GallerySection title="Caption preview canvas">
@@ -249,7 +249,7 @@ export const UIGallery = () => {
         </GallerySection>
 
         <GallerySection title="Transcript editor">
-          <TranscriptEditor words={MOCK_WORDS} />
+          <TranscriptEditor words={MOCK_WORDS} onChange={() => undefined} />
         </GallerySection>
       </div>
     </ToastProvider>

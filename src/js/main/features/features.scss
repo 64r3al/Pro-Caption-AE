@@ -1,7 +1,7 @@
 @use "../ui/mixins";
 
 // ==========================================================================================
-// Waveform (decorative)
+// Waveform peaks
 // ==========================================================================================
 .gc-waveform {
   display: flex;
@@ -159,4 +159,177 @@
 
 .gc-transcript-chip {
   color: var(--gc-text-primary);
+}
+
+
+// ==========================================================================================
+// Editable transcript controls
+// ==========================================================================================
+.gc-transcript-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gc-space-2);
+  min-width: 0;
+}
+
+.gc-transcript-chip {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  background: transparent;
+  cursor: pointer;
+  line-height: 1.5;
+  color: var(--gc-text-primary);
+  @include mixins.transition(background-color, border-color, color);
+
+  &:hover:not(:disabled) {
+    background: var(--gc-surface-2);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--gc-accent);
+    outline-offset: 1px;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+}
+
+.gc-transcript-chip--active {
+  color: var(--gc-accent);
+  background: var(--gc-surface-2);
+}
+
+.gc-transcript-chip--selected {
+  border-color: var(--gc-accent);
+}
+
+.gc-transcript-tools {
+  border-top: 1px solid var(--gc-border);
+  padding-top: var(--gc-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gc-space-2);
+}
+
+.gc-transcript-tools-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  font-size: var(--gc-text-xs);
+  color: var(--gc-text-secondary);
+
+  span {
+    color: var(--gc-text-muted);
+  }
+}
+
+.gc-transcript-edit-form {
+  display: grid;
+  grid-template-columns: minmax(100px, 2fr) minmax(70px, 1fr) minmax(70px, 1fr);
+  gap: var(--gc-space-2);
+  align-items: end;
+
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    font-size: var(--gc-text-2xs);
+    color: var(--gc-text-muted);
+  }
+
+  input {
+    min-width: 0;
+    width: 100%;
+    border: 1px solid var(--gc-border);
+    border-radius: var(--gc-radius-control);
+    background: var(--gc-surface-1);
+    color: var(--gc-text-primary);
+    padding: 6px 8px;
+    outline: none;
+
+    &:focus {
+      border-color: var(--gc-accent);
+    }
+  }
+}
+
+.gc-transcript-edit-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gc-space-2);
+
+  button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: var(--gc-radius-control);
+    padding: 6px 10px;
+    background: var(--gc-surface-2);
+    color: var(--gc-text-primary);
+    font-size: var(--gc-text-xs);
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      background: var(--gc-surface-3);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+  }
+}
+
+.gc-transcript-add-form {
+  display: flex;
+  gap: var(--gc-space-2);
+
+  input {
+    min-width: 0;
+    flex: 1;
+    border: 1px solid var(--gc-border);
+    border-radius: var(--gc-radius-control);
+    background: var(--gc-surface-1);
+    color: var(--gc-text-primary);
+    padding: 7px 8px;
+    outline: none;
+
+    &:focus {
+      border-color: var(--gc-accent);
+    }
+  }
+
+  button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: var(--gc-radius-control);
+    padding: 6px 10px;
+    background: var(--gc-surface-2);
+    color: var(--gc-text-primary);
+    font-size: var(--gc-text-xs);
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+  }
+}
+
+.gc-transcript-error {
+  color: #ff7c7c;
+  font-size: var(--gc-text-xs);
+  margin: 0;
+}
+
+@media (max-width: 420px) {
+  .gc-transcript-edit-form {
+    grid-template-columns: minmax(0, 1fr) minmax(70px, 1fr) minmax(70px, 1fr);
+  }
 }

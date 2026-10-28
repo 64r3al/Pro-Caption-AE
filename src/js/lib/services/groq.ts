@@ -1,7 +1,9 @@
 import { crypto, fs, https } from "../cep/node";
 import { assertNodeAvailable } from "./env";
 import { GROQ_TRANSCRIPTION_URL } from "../../../shared/constants";
-import type { GroqModel, TranscriptResult, TranscriptWord } from "../../../shared/types";
+import type { GroqModel, TranscriptResult } from "../../../shared/types";
+import { normalizeTranscriptWords } from "../../../shared/transcriptValidation";
+import { computeRetryDelayMs } from "../../../shared/retry";
 
 // We build the multipart/form-data body by hand instead of pulling in the npm `form-data`
 // package the master prompt's reference snippet uses: CEP's Node module resolution only sees
@@ -48,31 +50,7 @@ const buildMultipartBody = (
 
 // Groq verbose_json -> flat word list. Falls back to spreading words evenly across each
 // segment when word-level timestamps aren't returned (ported from the ScriptUI prototype).
-const normalizeWords = (resp: any): TranscriptWord[] => {
-  const out: TranscriptWord[] = [];
-  if (resp?.words?.length) {
-    for (const w of resp.words) {
-      const text = String(w.word ?? "").trim();
-      if (!text) continue;
-      out.push({ text, start: Number(w.start), end: Number(w.end) });
-    }
-    return out;
-  }
-  if (resp?.segments) {
-    for (const sg of resp.segments) {
-      const parts = String(sg.text ?? "")
-        .trim()
-        .split(/\s+/)
-        .filter(Boolean);
-      if (!parts.length) continue;
-      const d = (sg.end - sg.start) / parts.length;
-      parts.forEach((word: string, i: number) => {
-        out.push({ text: word, start: sg.start + d * i, end: sg.start + d * (i + 1) });
-      });
-    }
-  }
-  return out;
-};
+
 
 export interface TranscribeOptions {
   apiKey: string;
@@ -81,6 +59,8 @@ export interface TranscribeOptions {
   prompt?: string;
   /** Retries left on HTTP 429 before giving up. */
   maxRetries?: number;
+  /** Maximum wall-clock duration for one transcription HTTP request. Defaults to 120 seconds. */
+  timeoutMs?: number;
 }
 
 export interface TranscribeHandle {
@@ -88,7 +68,10 @@ export interface TranscribeHandle {
   cancel: () => void;
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const DEFAULT_RETRY_DELAY_MS = 1_000;
+const MAX_RETRY_DELAY_MS = 120_000;
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
 const postOnce = (
   filePath: string,
@@ -113,6 +96,19 @@ const postOnce = (
       data: fs.readFileSync(filePath),
     });
 
+    const timeoutMs =
+      opts.timeoutMs != null && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
+        ? opts.timeoutMs
+        : DEFAULT_REQUEST_TIMEOUT_MS;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const clearRequestTimeout = () => {
+      if (timeout !== null) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+    };
+
     const url = new URL(GROQ_TRANSCRIPTION_URL);
     const req = https.request(
       {
@@ -129,15 +125,33 @@ const postOnce = (
         let responseBody = "";
         res.on("data", (chunk: Buffer) => (responseBody += chunk));
         res.on("end", () => {
+          clearRequestTimeout();
           const retryAfterHeader = res.headers["retry-after"];
-          const retryAfterMs = retryAfterHeader
-            ? Number(retryAfterHeader) * 1000
-            : null;
+          const retryAfterSeconds =
+            retryAfterHeader == null ? Number.NaN : Number(retryAfterHeader);
+          const retryAfterMs =
+            Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
+              ? retryAfterSeconds * 1000
+              : null;
           resolve({ status: res.statusCode || 0, body: responseBody, retryAfterMs });
+        });
+        res.on("error", (err: Error) => {
+          clearRequestTimeout();
+          reject(err);
         });
       }
     );
-    req.on("error", (err: Error) => reject(err));
+
+    timeout = setTimeout(() => {
+      req.destroy(
+        new Error(`Groq transcription request timed out after ${Math.round(timeoutMs / 1000)} seconds.`)
+      );
+    }, timeoutMs);
+
+    req.on("error", (err: Error) => {
+      clearRequestTimeout();
+      reject(err);
+    });
     onRequest(req);
     req.write(body);
     req.end();
@@ -151,6 +165,22 @@ export const transcribe = (filePath: string, opts: TranscribeOptions): Transcrib
   assertNodeAvailable();
   let cancelled = false;
   let activeReq: any = null;
+  let activeRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let resolveRetryDelay: (() => void) | null = null;
+
+  const waitForRetry = (ms: number): Promise<void> =>
+    new Promise((resolve) => {
+      if (cancelled) {
+        resolve();
+        return;
+      }
+      resolveRetryDelay = resolve;
+      activeRetryTimer = setTimeout(() => {
+        activeRetryTimer = null;
+        resolveRetryDelay = null;
+        resolve();
+      }, ms);
+    });
 
   const run = async (): Promise<TranscriptResult> => {
     const maxRetries = opts.maxRetries ?? 3;
@@ -168,10 +198,17 @@ export const transcribe = (filePath: string, opts: TranscribeOptions): Transcrib
       if (cancelled) throw new Error("Cancelled.");
 
       if (result.status === 429 && attempt < maxRetries) {
-        const backoffMs = result.retryAfterMs ?? 1000 * Math.pow(2, attempt);
-        attempt++;
-        await sleep(backoffMs);
-        continue;
+        const backoffMs = computeRetryDelayMs(
+          attempt,
+          result.retryAfterMs,
+          DEFAULT_RETRY_DELAY_MS,
+          MAX_RETRY_DELAY_MS
+        );
+        if (backoffMs !== null) {
+          attempt++;
+          await waitForRetry(backoffMs);
+          continue;
+        }
       }
 
       let parsed: any;
@@ -187,7 +224,10 @@ export const transcribe = (filePath: string, opts: TranscribeOptions): Transcrib
           message += "\n\nYour API key is invalid or revoked. Paste a new one in Settings.";
         }
         if (result.status === 429) {
-          message += "\n\nFree-tier rate limit reached. Wait a bit and try again.";
+          message += "\n\nRate limit reached. Wait before trying again.";
+          if (result.retryAfterMs !== null && result.retryAfterMs > MAX_RETRY_DELAY_MS) {
+            message += "\nThe server requested a longer wait than the automatic retry window; the app did not retry early.";
+          }
         }
         throw new Error(message);
       }
@@ -196,7 +236,7 @@ export const transcribe = (filePath: string, opts: TranscribeOptions): Transcrib
         text: parsed.text || "",
         language: parsed.language,
         duration: parsed.duration,
-        words: normalizeWords(parsed),
+        words: normalizeTranscriptWords(parsed),
         segments: parsed.segments || [],
       };
     }
@@ -206,6 +246,13 @@ export const transcribe = (filePath: string, opts: TranscribeOptions): Transcrib
     promise: run(),
     cancel: () => {
       cancelled = true;
+      if (activeRetryTimer !== null) {
+        clearTimeout(activeRetryTimer);
+        activeRetryTimer = null;
+      }
+      const resumeRetry = resolveRetryDelay;
+      resolveRetryDelay = null;
+      resumeRetry?.();
       try {
         activeReq?.destroy(new Error("Cancelled."));
       } catch {

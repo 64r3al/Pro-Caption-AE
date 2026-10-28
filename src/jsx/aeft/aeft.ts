@@ -316,115 +316,253 @@ const createCaptionLayer = (
   // ExtendScript quirk, so that conversion happens here and only here.
   const aeText = group.text.replace(/\n/g, "\r");
   const lyr = comp.layers.addText(aeText);
-  const label = group.text.replace(/\r|\n/g, " ");
-  const numberPrefix = index < 10 ? "00" : index < 100 ? "0" : "";
-  lyr.name = "CAP " + numberPrefix + index + "  " + label.substr(0, 24);
-
-  const srcProp = p(p(lyr, "ADBE Text Properties"), "ADBE Text Document");
-  const doc: TextDocument = srcProp.value;
   try {
-    doc.resetCharStyle();
-  } catch (e0) {
-    // not fatal - some AE versions/fonts don't support a full style reset
-  }
-  doc.text = aeText;
-  try {
-    doc.font = style.font;
-  } catch (e1) {
-    // invalid/missing PostScript font name - fall back to whatever font AE already picked
-  }
-  doc.fontSize = style.size;
-  doc.applyFill = true;
-  doc.fillColor = intToRgb(style.textColor);
-  if (style.strokeWidth > 0) {
-    doc.applyStroke = true;
-    doc.strokeColor = intToRgb(style.strokeColor);
-    doc.strokeWidth = style.strokeWidth;
-    doc.strokeOverFill = false;
-  } else {
-    doc.applyStroke = false;
-  }
-  doc.justification = ParagraphJustification.CENTER_JUSTIFY;
-  srcProp.setValue(doc);
+    const label = group.text.replace(/\r|\n/g, " ");
+    const numberPrefix = index < 10 ? "00" : index < 100 ? "0" : "";
+    lyr.name = "CAP " + numberPrefix + index + "  " + label.substr(0, 24);
 
-  lyr.inPoint = group.start;
-  lyr.outPoint = group.end;
-
-  // Word-based anchor grouping so per-word scale pops from each word's own center.
-  try {
-    p(p(lyr, "ADBE Text Properties"), "ADBE Text More Options")
-      .property("ADBE Text Anchor Point Option")
-      .setValue(2);
-  } catch (e2) {
-    // cosmetic only - pop animation still works, just anchored at the layer's default point
-  }
-
-  const transform = lyr.property("ADBE Transform Group");
-  p(transform, "ADBE Anchor Point").expression =
-    "var r=sourceRectAtTime(outPoint-thisComp.frameDuration,false);\n[r.left+r.width/2, r.top+r.height/2];";
-  // yOffset is authored against a 1920px-tall frame; scale it to this comp's height.
-  const yOffset = style.yOffset != null ? (style.yOffset * comp.height) / 1920 : 0;
-  p(transform, "ADBE Position").setValue([
-    comp.width / 2,
-    comp.height * POSITION_Y_FRACTIONS[style.posIndex] + yOffset,
-  ]);
-
-  const times = revealTimesFor(group, style.leadInFrames, comp.frameRate);
-  const endTimes: number[] = [];
-  for (let i = 0; i < group.words.length; i++) {
-    const nextStart = i + 1 < group.words.length ? group.words[i + 1].start : group.end;
-    endTimes.push(Math.min(group.end, Math.max(group.words[i].end, nextStart)));
-  }
-
-  if (style.highlight) {
-    const hc = intToRgb(style.highlightColor);
-    addWordAnimator(
-      lyr,
-      "Active Word",
-      "ADBE Text Fill Color",
-      [[hc[0], hc[1], hc[2], 1], hc],
-      exprActiveWord(times, endTimes)
-    );
-  }
-  if (style.pop) {
-    // The selector swings 0 -> ~100 -> 0 right after each reveal, so the word overshoots to
-    // (100 + bounce)% and settles back at 100%.
-    const peak = 100 + (style.bounceScale != null ? style.bounceScale : 30);
-    addWordAnimator(
-      lyr,
-      "Pop In",
-      "ADBE Text Scale 3D",
-      [[peak, peak, 100], [peak, peak]],
-      exprPop(times, 0.18)
-    );
-  }
-  // Older callers only sent animMode; the three modes they could animate map 1:1.
-  const motion =
-    style.motion != null
-      ? style.motion
-      : style.animMode === "rotate" || style.animMode === "squash" || style.animMode === "wave"
-      ? style.animMode
-      : "none";
-  if (motion !== "none") {
+    const srcProp = p(p(lyr, "ADBE Text Properties"), "ADBE Text Document");
+    const doc: TextDocument = srcProp.value;
     try {
-      addMotionAnimator(lyr, motion, times, style.size);
-    } catch (eMotion) {
-      // a motion AE can't apply on this build/font shouldn't cost the whole caption
+      doc.resetCharStyle();
+    } catch (e0) {
+      // not fatal - some AE versions/fonts don't support a full style reset
     }
-  }
-  if (style.reveal) {
-    addWordAnimator(lyr, "Reveal (synced)", "ADBE Text Opacity", [0], exprHideUntilSpoken(times));
-  }
-  if (style.shadow) {
+    doc.text = aeText;
     try {
-      const fx = p(lyr, "ADBE Effect Parade").addProperty("ADBE Drop Shadow");
-      p(fx, "ADBE Drop Shadow-0004").setValue(6);
-      p(fx, "ADBE Drop Shadow-0005").setValue(14);
-    } catch (e3) {
-      // drop shadow is cosmetic - skip it rather than fail the whole build
+      doc.font = style.font;
+    } catch (e1) {
+      // invalid/missing PostScript font name - fall back to whatever font AE already picked
     }
+    doc.fontSize = style.size;
+    doc.applyFill = true;
+    doc.fillColor = intToRgb(style.textColor);
+    if (style.strokeWidth > 0) {
+      doc.applyStroke = true;
+      doc.strokeColor = intToRgb(style.strokeColor);
+      doc.strokeWidth = style.strokeWidth;
+      doc.strokeOverFill = false;
+    } else {
+      doc.applyStroke = false;
+    }
+    doc.justification = ParagraphJustification.CENTER_JUSTIFY;
+    srcProp.setValue(doc);
+
+    lyr.inPoint = group.start;
+    lyr.outPoint = group.end;
+
+    // Word-based anchor grouping so per-word scale pops from each word's own center.
+    try {
+      p(p(lyr, "ADBE Text Properties"), "ADBE Text More Options")
+        .property("ADBE Text Anchor Point Option")
+        .setValue(2);
+    } catch (e2) {
+      // cosmetic only - pop animation still works, just anchored at the layer's default point
+    }
+
+    const transform = lyr.property("ADBE Transform Group");
+    p(transform, "ADBE Anchor Point").expression =
+      "var r=sourceRectAtTime(outPoint-thisComp.frameDuration,false);\n[r.left+r.width/2, r.top+r.height/2];";
+    // yOffset is authored against a 1920px-tall frame; scale it to this comp's height.
+    const yOffset = style.yOffset != null ? (style.yOffset * comp.height) / 1920 : 0;
+    p(transform, "ADBE Position").setValue([
+      comp.width / 2,
+      comp.height * POSITION_Y_FRACTIONS[style.posIndex] + yOffset,
+    ]);
+
+    const times = revealTimesFor(group, style.leadInFrames, comp.frameRate);
+    const endTimes: number[] = [];
+    for (let i = 0; i < group.words.length; i++) {
+      const nextStart = i + 1 < group.words.length ? group.words[i + 1].start : group.end;
+      endTimes.push(Math.min(group.end, Math.max(group.words[i].end, nextStart)));
+    }
+
+    if (style.highlight) {
+      const hc = intToRgb(style.highlightColor);
+      addWordAnimator(
+        lyr,
+        "Active Word",
+        "ADBE Text Fill Color",
+        [[hc[0], hc[1], hc[2], 1], hc],
+        exprActiveWord(times, endTimes)
+      );
+    }
+    if (style.pop) {
+      // The selector swings 0 -> ~100 -> 0 right after each reveal, so the word overshoots to
+      // (100 + bounce)% and settles back at 100%.
+      const peak = 100 + (style.bounceScale != null ? style.bounceScale : 30);
+      addWordAnimator(
+        lyr,
+        "Pop In",
+        "ADBE Text Scale 3D",
+        [[peak, peak, 100], [peak, peak]],
+        exprPop(times, 0.18)
+      );
+    }
+    // Older callers only sent animMode; the three modes they could animate map 1:1.
+    const motion =
+      style.motion != null
+        ? style.motion
+        : style.animMode === "rotate" || style.animMode === "squash" || style.animMode === "wave"
+        ? style.animMode
+        : "none";
+    if (motion !== "none") {
+      try {
+        addMotionAnimator(lyr, motion, times, style.size);
+      } catch (eMotion) {
+        // a motion AE can't apply on this build/font shouldn't cost the whole caption
+      }
+    }
+    if (style.reveal) {
+      addWordAnimator(lyr, "Reveal (synced)", "ADBE Text Opacity", [0], exprHideUntilSpoken(times));
+    }
+    if (style.shadow) {
+      try {
+        const fx = p(lyr, "ADBE Effect Parade").addProperty("ADBE Drop Shadow");
+        p(fx, "ADBE Drop Shadow-0004").setValue(6);
+        p(fx, "ADBE Drop Shadow-0005").setValue(14);
+      } catch (e3) {
+        // drop shadow is cosmetic - skip it rather than fail the whole build
+      }
+    }
+    return lyr;
+  } catch (error: any) {
+    try {
+      lyr.remove();
+    } catch (cleanupError: any) {
+      const originalMessage = error && error.message ? error.message : String(error);
+      const cleanupMessage = cleanupError && cleanupError.message ? cleanupError.message : String(cleanupError);
+      throw new Error(
+        "Caption layer creation failed: " + originalMessage +
+        ". Automatic cleanup of the partial layer also failed: " + cleanupMessage +
+        ". Please inspect the composition before continuing."
+      );
+    }
+    throw error;
   }
-  return lyr;
+};
+
+interface PresetDecorationConfig {
+  kind: "background" | "underline" | "marker";
+  color: number;
+  opacity: number;
+  paddingX: number;
+  paddingY: number;
+  radius: number;
+}
+
+const getPresetDecorationConfig = (style: CaptionStyle): PresetDecorationConfig | null => {
+  const mode = style.animMode || "";
+  if (mode === "underline") {
+    return {
+      kind: "underline",
+      color: style.highlightColor,
+      opacity: 100,
+      paddingX: 14,
+      paddingY: 5,
+      radius: 2,
+    };
+  }
+  if (mode === "marker") {
+    return {
+      kind: "marker",
+      color: style.highlightColor,
+      opacity: 48,
+      paddingX: 12,
+      paddingY: 1,
+      radius: 2,
+    };
+  }
+
+  // Native AE rectangle treatments for card-style presets. These are deliberately simple,
+  // editable shape layers; the UI must not imply that browser-only icons/chrome are reproduced.
+  if (mode === "sticker") return { kind: "background", color: 0xffffff, opacity: 100, paddingX: 30, paddingY: 20, radius: 10 };
+  if (mode === "sticky-note") return { kind: "background", color: 0xffe47a, opacity: 100, paddingX: 34, paddingY: 24, radius: 2 };
+  if (mode === "blur-box") return { kind: "background", color: 0x16181d, opacity: 88, paddingX: 28, paddingY: 16, radius: 12 };
+  if (mode === "terminal") return { kind: "background", color: 0x06150d, opacity: 96, paddingX: 34, paddingY: 22, radius: 6 };
+  if (mode === "search-bar") return { kind: "background", color: 0x202124, opacity: 100, paddingX: 36, paddingY: 20, radius: 24 };
+  if (mode === "reddit") return { kind: "background", color: 0x1a1a1b, opacity: 96, paddingX: 30, paddingY: 18, radius: 8 };
+  if (mode === "tweet") return { kind: "background", color: 0x050505, opacity: 94, paddingX: 30, paddingY: 18, radius: 10 };
+  if (mode === "quote") return { kind: "background", color: 0x242424, opacity: 92, paddingX: 36, paddingY: 26, radius: 8 };
+  if (mode === "stat-card") return { kind: "background", color: 0x111827, opacity: 96, paddingX: 36, paddingY: 24, radius: 12 };
+  if (mode === "newspaper") return { kind: "background", color: 0xf1e8d4, opacity: 100, paddingX: 32, paddingY: 22, radius: 0 };
+  if (mode === "callout") return { kind: "background", color: 0x11233a, opacity: 94, paddingX: 28, paddingY: 18, radius: 8 };
+  if (mode === "timeline") return { kind: "background", color: 0x12243a, opacity: 92, paddingX: 24, paddingY: 16, radius: 6 };
+  if (mode === "chapter") return { kind: "background", color: 0x0b0b0d, opacity: 90, paddingX: 36, paddingY: 26, radius: 0 };
+  if (mode === "stamp") return { kind: "background", color: 0x3a2020, opacity: 90, paddingX: 24, paddingY: 14, radius: 1 };
+  if (mode === "diary") return { kind: "background", color: 0xf0e3c8, opacity: 100, paddingX: 34, paddingY: 22, radius: 2 };
+  if (mode === "collage") return { kind: "background", color: 0xf7f4eb, opacity: 100, paddingX: 26, paddingY: 22, radius: 4 };
+  if (mode === "hologram") return { kind: "background", color: 0x062b32, opacity: 58, paddingX: 26, paddingY: 18, radius: 4 };
+  return null;
+};
+
+/** Builds editable native shape treatments for presets that call for a box, marker, or underline.
+ * The shape follows the text layer's position and shares its in/out points, so the decoration
+ * remains synchronized when the generated caption composition is moved or trimmed. */
+const createPresetDecorationLayer = (
+  comp: CompItem,
+  textLayer: TextLayer,
+  group: CaptionGroupData,
+  index: number,
+  style: CaptionStyle
+): ShapeLayer | null => {
+  const config = getPresetDecorationConfig(style);
+  if (!config) return null;
+
+  const shape = comp.layers.addShape();
+  try {
+    const bounds = (textLayer as any).sourceRectAtTime(group.start, false);
+    const measuredWidth = bounds && isFinite(bounds.width) ? Math.max(1, bounds.width) : Math.max(1, style.size * group.text.length * 0.55);
+    const measuredHeight = bounds && isFinite(bounds.height) ? Math.max(1, bounds.height) : Math.max(1, style.size * 1.2);
+    let width = measuredWidth + config.paddingX * 2;
+    let height = measuredHeight + config.paddingY * 2;
+    let offsetY = 0;
+
+    if (config.kind === "underline") {
+      height = Math.max(3, style.size * 0.055);
+      offsetY = measuredHeight / 2 + Math.max(2, config.paddingY);
+    } else if (config.kind === "marker") {
+      height = Math.max(8, measuredHeight * 0.55 + config.paddingY * 2);
+      offsetY = measuredHeight * 0.12;
+    }
+
+    const root = p(shape, "ADBE Root Vectors Group");
+    const groupVectors = root.addProperty("ADBE Vector Group");
+    groupVectors.name = "Caption Decoration " + index;
+    const vectors = p(groupVectors, "ADBE Vectors Group");
+    const rectangle = vectors.addProperty("ADBE Vector Shape - Rect");
+    p(rectangle, "ADBE Vector Rect Size").setValue([width, height]);
+    p(rectangle, "ADBE Vector Rect Position").setValue([0, offsetY]);
+    p(rectangle, "ADBE Vector Rect Roundness").setValue(config.radius);
+    const fill = vectors.addProperty("ADBE Vector Graphic - Fill");
+    p(fill, "ADBE Vector Fill Color").setValue(intToRgb(config.color));
+    p(fill, "ADBE Vector Fill Opacity").setValue(config.opacity);
+
+    const yOffset = style.yOffset != null ? (style.yOffset * comp.height) / 1920 : 0;
+    p(shape, "ADBE Transform Group").property("ADBE Position").setValue([
+      comp.width / 2,
+      comp.height * POSITION_Y_FRACTIONS[style.posIndex] + yOffset,
+    ]);
+    shape.name = "CAP DECOR " + (index < 10 ? "00" : index < 100 ? "0" : "") + index;
+    shape.inPoint = group.start;
+    shape.outPoint = group.end;
+    // Put the shape behind generated text. Only the generated layers are later precomposed.
+    shape.moveToEnd();
+    return shape;
+  } catch (error: any) {
+    try {
+      shape.remove();
+    } catch (cleanupError: any) {
+      const originalMessage = error && error.message ? error.message : String(error);
+      const cleanupMessage = cleanupError && cleanupError.message ? cleanupError.message : String(cleanupError);
+      throw new Error(
+        "Preset decoration creation failed: " + originalMessage +
+        ". Automatic cleanup failed: " + cleanupMessage +
+        ". Please inspect the composition before continuing."
+      );
+    }
+    throw error;
+  }
 };
 
 /** Builds every caption layer and precomposes them, in one undo step. `groups` must already
@@ -443,24 +581,153 @@ export const buildCaptions = (
   if (!groups.length) {
     throw new Error("No words to build captions from.");
   }
+  if (!style || typeof style.font !== "string" || !style.font.replace(/^\s+|\s+$/g, "")) {
+    throw new Error("Choose a valid font before building captions.");
+  }
+  if (!isFinite(style.size) || style.size <= 0) {
+    throw new Error("Caption font size must be a positive number.");
+  }
+  if (!isFinite(style.strokeWidth) || style.strokeWidth < 0) {
+    throw new Error("Caption stroke width must be zero or a positive number.");
+  }
+  if (
+    style.posIndex !== 0 &&
+    style.posIndex !== 1 &&
+    style.posIndex !== 2 &&
+    style.posIndex !== 3
+  ) {
+    throw new Error("Caption position is invalid. Choose Top, Center, Lower third, or Bottom.");
+  }
 
   let wordCount = 0;
-  for (let i = 0; i < groups.length; i++) wordCount += groups[i].words.length;
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    if (!group || !group.words || !group.words.length || typeof group.text !== "string" || !group.text.replace(/^\s+|\s+$/g, "")) {
+      throw new Error("Caption group " + (i + 1) + " has no usable text.");
+    }
+    if (
+      !isFinite(group.start) ||
+      !isFinite(group.end) ||
+      group.start < 0 ||
+      group.end <= group.start ||
+      group.end > comp.duration + 1e-6
+    ) {
+      throw new Error("Caption group " + (i + 1) + " has invalid timing.");
+    }
+    for (let j = 0; j < group.words.length; j++) {
+      const word = group.words[j];
+      if (
+        !word ||
+        typeof word.text !== "string" ||
+        !word.text.replace(/^\s+|\s+$/g, "") ||
+        !isFinite(word.start) ||
+        !isFinite(word.end) ||
+        word.start < 0 ||
+        word.end < word.start
+      ) {
+        throw new Error("Caption group " + (i + 1) + " contains invalid word timing or text.");
+      }
+      wordCount++;
+    }
+  }
 
   const precompName = "Captions - " + comp.name;
+  const originalProjectItemCount = app.project.numItems;
+  const layers: any[] = [];
+  let precompItem: any = null;
   app.beginUndoGroup("Pro Caption AE");
   try {
-    const layers: TextLayer[] = [];
     for (let i = 0; i < groups.length; i++) {
-      layers.push(createCaptionLayer(comp, groups[i], i + 1, style));
+      const textLayer = createCaptionLayer(comp, groups[i], i + 1, style);
+      layers.push(textLayer);
+      const decorationLayer = createPresetDecorationLayer(comp, textLayer, groups[i], i + 1, style);
+      if (decorationLayer) layers.push(decorationLayer);
     }
     const indices: number[] = [];
     for (let j = 0; j < layers.length; j++) indices.push(layers[j].index);
-    const pre = comp.layers.precompose(indices, precompName, true);
-    pre.comment = "Generated by Pro Caption AE";
+    // Layer indices shift as native decoration shapes are moved behind text. Always sort the
+    // final current indices into layer-stack order before passing them to precompose().
+    indices.sort(function (a: number, b: number): number { return a - b; });
+    precompItem = comp.layers.precompose(indices, precompName, true);
+    precompItem.comment = "Generated by Pro Caption AE";
+  } catch (error: any) {
+    const cleanupErrors: string[] = [];
+    const originalMessage = error && error.message ? error.message : String(error);
+
+    if (precompItem) {
+      for (let index = comp.numLayers; index >= 1; index--) {
+        try {
+          const parentLayer: any = comp.layer(index);
+          if (parentLayer && parentLayer.source === precompItem) {
+            parentLayer.remove();
+          }
+        } catch (removeParentError: any) {
+          cleanupErrors.push("could not remove the generated precomposition layer");
+        }
+      }
+      try {
+        precompItem.remove();
+      } catch (removePrecompError: any) {
+        cleanupErrors.push("could not remove the generated precomposition item");
+      }
+    } else {
+      for (let k = layers.length - 1; k >= 0; k--) {
+        try {
+          layers[k].remove();
+        } catch (removeLayerError: any) {
+          cleanupErrors.push("could not remove generated layer " + (k + 1));
+        }
+      }
+      // If precompose itself failed after creating its project item, clean only items that
+      // were created during this synchronous operation; pre-existing user items are untouched.
+      for (let itemIndex = app.project.numItems; itemIndex > originalProjectItemCount; itemIndex--) {
+        try {
+          const item: any = app.project.item(itemIndex);
+          if (item instanceof CompItem) item.remove();
+        } catch (removeNewItemError: any) {
+          cleanupErrors.push("could not inspect/remove a newly created project item");
+        }
+      }
+    }
+
+    if (cleanupErrors.length) {
+      throw new Error(
+        "Caption build failed: " + originalMessage +
+        ". Automatic cleanup was incomplete (" + cleanupErrors.join("; ") +
+        "). Please inspect the composition before continuing."
+      );
+    }
+    throw error;
   } finally {
     app.endUndoGroup();
   }
 
   return { words: wordCount, captions: groups.length, precompName: precompName };
+};
+
+
+/** Opens After Effects' native save dialog for a supported subtitle/data export. */
+export const pickExportPath = (format: string): string | null => {
+  let extension = "";
+  let title = "Export file";
+  if (format === "srt") {
+    extension = "srt";
+    title = "Export SubRip subtitles";
+  } else if (format === "vtt") {
+    extension = "vtt";
+    title = "Export WebVTT subtitles";
+  } else if (format === "json") {
+    extension = "json";
+    title = "Export transcript JSON";
+  } else {
+    throw new Error("Unsupported export format.");
+  }
+
+  const chosen = File.saveDialog(title, "*." + extension);
+  if (!chosen) return null;
+  const currentPath = chosen.fsName;
+  const requiredSuffix = "." + extension;
+  return currentPath.toLowerCase().slice(-requiredSuffix.length) === requiredSuffix
+    ? currentPath
+    : currentPath + requiredSuffix;
 };

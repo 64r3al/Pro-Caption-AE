@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { evalTS } from "../lib/utils/bolt";
 import { resolveApiKey } from "../lib/services/apiKey";
-import { removeTempFile } from "../lib/services/ffmpeg";
+import { extractWaveformPeaks, findFfmpeg, removeTempFile } from "../lib/services/ffmpeg";
 import { refineWordTiming, transcribeSelection, type TranscriptionJob } from "../lib/services/pipeline";
 import { SettingsTab } from "./components/SettingsTab";
 import { ToastProvider, useToast } from "./ui/Toast";
@@ -24,7 +24,7 @@ import type {
   TranscriptWord,
 } from "../../shared/types";
 import { VIRAL_PRESETS, type ViralPreset } from "../../shared/presets";
-import { MOTION_OPTIONS, motionForAnimMode, type MotionType } from "../../shared/motion";
+import { MOTION_OPTIONS, isMotionType, motionForAnimMode, type MotionType } from "../../shared/motion";
 import { cssFontFor } from "../../shared/fonts";
 import {
   getCachedFonts,
@@ -35,8 +35,14 @@ import {
 } from "../lib/services/fonts";
 import { FontPicker } from "./features/FontPicker";
 import { PresetLibraryModal } from "./features/PresetLibraryModal";
+import { TranscriptEditor } from "./features/TranscriptEditor";
+import { writeExportFile } from "../lib/services/export";
+import { loadCustomPresets, persistCustomPresets } from "../lib/services/customPresets";
 import { syncWords } from "../../shared/sync";
 import { buildGroups } from "../../shared/captions";
+import { formatSubtitles, type SubtitleFormat } from "../../shared/subtitles";
+import { getPresetRenderSupport } from "../../shared/presetCapabilities";
+import { isArabicLanguage } from "../../shared/languages";
 import { displayName, version } from "../../shared/shared";
 import "./app.scss";
 
@@ -55,6 +61,8 @@ export const AppContent = () => {
   const { show: showToast } = useToast();
   const [currentTab, setCurrentTab] = useState<Tab>("transcribe");
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [customPresets, setCustomPresets] = useState<ViralPreset[]>(() => loadCustomPresets());
+  const availablePresets = useMemo(() => [...VIRAL_PRESETS, ...customPresets], [customPresets]);
 
   // Selection info
   const [selection, setSelection] = useState<SelectedAudioLayerInfo | null>(null);
@@ -63,6 +71,7 @@ export const AppContent = () => {
   // Groq Speech Engine Settings
   const [model, setModel] = useState<GroqModel>("whisper-large-v3-turbo");
   const [language, setLanguage] = useState("");
+  const [transcriptLanguage, setTranscriptLanguage] = useState("");
   const [glossary, setGlossary] = useState<string[]>([]);
   const [newGlossaryTag, setNewGlossaryTag] = useState("");
   const [isAddingTag, setIsAddingTag] = useState(false);
@@ -74,6 +83,8 @@ export const AppContent = () => {
   // so the sample is never built into the user's comp.
   const [activeWords, setActiveWords] = useState<TranscriptWord[]>(SAMPLE_TRANSCRIPT);
   const [hasTranscript, setHasTranscript] = useState(false);
+  const [isTranscriptEdited, setIsTranscriptEdited] = useState(false);
+  const [transcriptRevision, setTranscriptRevision] = useState(0);
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const jobRef = useRef<TranscriptionJob | null>(null);
   // Audio the current transcript came from, kept for onset refinement at build time.
@@ -83,13 +94,27 @@ export const AppContent = () => {
   const transcribedLayer = useRef<SelectedAudioLayerInfo | null>(null);
 
   // Waveform state
-  const [scrubberPos, setScrubberPos] = useState(34); // %
+  const [scrubberPos, setScrubberPos] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
-  const [activeWordIndex, setActiveWordIndex] = useState(1); // 'VIRAL'
-  const [currentFrame, setCurrentFrame] = useState(426);
-  const totalFrames = 1275;
-  const compDuration = 42.5;
+  const [activeWordIndex, setActiveWordIndex] = useState(0);
+  const [currentFrame, setCurrentFrame] = useState(1);
+  const [waveformHeights, setWaveformHeights] = useState<number[] | null>(null);
+  const [waveformStatus, setWaveformStatus] = useState("Select an audio layer to analyze its waveform.");
+  const previewInfo = hasTranscript && transcribedLayer.current ? transcribedLayer.current : selection;
+  const fallbackPreviewDuration = 42.5;
+  const previewDuration =
+    previewInfo?.compDuration && previewInfo.compDuration > 0 ? previewInfo.compDuration : fallbackPreviewDuration;
+  const previewFps =
+    previewInfo?.compFrameRate && previewInfo.compFrameRate > 0 ? previewInfo.compFrameRate : 30;
+  const waveformInfo = hasTranscript && transcribedLayer.current ? transcribedLayer.current : selection;
+  const waveformClipLeft = waveformInfo && previewDuration > 0
+    ? Math.max(0, Math.min(100, (waveformInfo.inPoint / previewDuration) * 100))
+    : 0;
+  const waveformClipWidth = waveformInfo && previewDuration > 0
+    ? Math.max(0, Math.min(100 - waveformClipLeft, ((waveformInfo.outPoint - waveformInfo.inPoint) / previewDuration) * 100))
+    : 100;
+  const totalFrames = Math.max(1, Math.round(previewDuration * previewFps));
 
   // Live Preview Canvas state
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>("9:16");
@@ -115,7 +140,7 @@ export const AppContent = () => {
   const [isBuilding, setIsBuilding] = useState(false);
 
   // Current active preset object
-  const currentPreset = VIRAL_PRESETS.find((p) => p.id === selectedPresetId) || VIRAL_PRESETS[0];
+  const currentPreset = availablePresets.find((p) => p.id === selectedPresetId) || VIRAL_PRESETS[0];
 
   // null = use the preset's own motion. Kinetic Motion presets and any override preview the
   // exact motion After Effects will build; classic presets keep their bespoke preview looks.
@@ -179,22 +204,102 @@ export const AppContent = () => {
     };
   }, []);
 
-  // Playback loop for live preview (Automatic, Real-Time Synchronized)
+  // The playhead advances in real time. When a transcript exists, its active word follows
+  // the selected layer's actual source-to-composition time mapping.
   useEffect(() => {
-    if (!isPlaying) return;
-    const intervalMs = Math.round(520 / playbackSpeed);
+    if (!isPlaying || previewDuration <= 0) return;
+    const intervalMs = 100;
+    const increment = (intervalMs * playbackSpeed * 100) / (1000 * previewDuration);
     const interval = window.setInterval(() => {
-      setActiveWordIndex((prev) => (prev + 1) % activeWords.length);
-      setCurrentFrame((prev) => (prev >= totalFrames ? 1 : prev + 15));
-      setScrubberPos((prev) => (prev >= 98 ? 2 : prev + 2));
+      setScrubberPos((previous) => {
+        const next = previous + increment;
+        return next >= 100 ? 0 : next;
+      });
     }, intervalMs);
     return () => window.clearInterval(interval);
-  }, [isPlaying, activeWords.length, playbackSpeed]);
+  }, [isPlaying, playbackSpeed, previewDuration]);
+
+  // Keep the sample preview lively before the first transcription; real transcripts are
+  // instead driven by the playhead timing below.
+  useEffect(() => {
+    if (!isPlaying || hasTranscript || !activeWords.length) return;
+    const interval = window.setInterval(() => {
+      setActiveWordIndex((previous) => (previous + 1) % activeWords.length);
+    }, Math.round(520 / playbackSpeed));
+    return () => window.clearInterval(interval);
+  }, [isPlaying, hasTranscript, activeWords.length, playbackSpeed]);
+
+  useEffect(() => {
+    const currentTime = (scrubberPos / 100) * previewDuration;
+    if (hasTranscript && activeWords.length) {
+      const info = transcribedLayer.current;
+      let bestIndex = 0;
+      for (let index = 0; index < activeWords.length; index++) {
+        const word = activeWords[index];
+        const start = info
+          ? info.startTime + (info.sourceInSeconds + word.start) * (info.stretchPercent / 100)
+          : word.start;
+        if (start <= currentTime) bestIndex = index;
+        else break;
+      }
+      setActiveWordIndex(bestIndex);
+    }
+    setCurrentFrame(Math.max(1, Math.min(totalFrames, Math.floor(currentTime * previewFps) + 1)));
+  }, [scrubberPos, activeWords, hasTranscript, previewDuration, previewFps, totalFrames]);
+
+  useEffect(() => {
+    const info = hasTranscript && transcribedLayer.current ? transcribedLayer.current : selection;
+    if (!info) {
+      setWaveformHeights(null);
+      setWaveformStatus("Select an audio layer to analyze its waveform.");
+      return;
+    }
+
+    let cancelled = false;
+    const loadWaveform = async () => {
+      setWaveformHeights(null);
+      setWaveformStatus("Analyzing audio waveform…");
+      try {
+        const ffmpegPath = findFfmpeg();
+        if (!ffmpegPath) {
+          setWaveformStatus("FFmpeg is required to analyze the real waveform.");
+          return;
+        }
+        const heights = await extractWaveformPeaks(
+          ffmpegPath,
+          info.sourceFilePath,
+          info.sourceInSeconds,
+          info.sourceDurationSeconds,
+          64
+        );
+        if (cancelled) return;
+        setWaveformHeights(heights);
+        setWaveformStatus("Audio waveform ready.");
+      } catch (err: any) {
+        if (cancelled) return;
+        setWaveformHeights(null);
+        setWaveformStatus(err?.message || "Could not analyze this source's audio waveform.");
+      }
+    };
+    void loadWaveform();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selection?.sourceFilePath,
+    selection?.sourceInSeconds,
+    selection?.sourceDurationSeconds,
+    hasTranscript,
+  ]);
 
   // Handle Preset selection
   const applyPreset = (preset: ViralPreset) => {
     setSelectedPresetId(preset.id);
-    setMotionOverride(null);
+    setMotionOverride(preset.motionOverride && isMotionType(preset.motionOverride) ? preset.motionOverride : null);
+    if (preset.id.startsWith("custom-")) {
+      setFontOverride(preset.font);
+      saveFontOverride(preset.font);
+    }
     setFontSize(preset.fontSize);
     setWordsPerGroup(preset.wordsPerGroup);
     setBounceScale(preset.bounceScale);
@@ -210,8 +315,102 @@ export const AppContent = () => {
   };
 
   const handleSelectPresetById = (id: string) => {
-    const p = VIRAL_PRESETS.find((item) => item.id === id);
+    const p = availablePresets.find((item) => item.id === id);
     if (p) applyPreset(p);
+  };
+
+  const handleSaveCustomPreset = () => {
+    if (customPresets.length >= 100) {
+      showToast({
+        title: "Custom preset limit reached",
+        description: "This release supports up to 100 saved custom presets. Delete one before saving another.",
+        variant: "error",
+      });
+      return;
+    }
+
+    const enteredName = window.prompt("Name this custom preset", currentPreset.name + " Custom");
+    if (enteredName === null) return;
+    const name = enteredName.replace(/^\s+|\s+$/g, "").slice(0, 80);
+    if (!name) {
+      showToast({ title: "Preset name required", description: "Enter a name before saving.", variant: "error" });
+      return;
+    }
+
+    const id = "custom-" + Date.now().toString(36);
+    const preset: ViralPreset = {
+      ...currentPreset,
+      id,
+      num: 1000 + customPresets.length,
+      name,
+      category: "Kinetic Motion",
+      tag: "CUSTOM",
+      whatItLooksLike: "Saved custom typography and animation settings",
+      description: "Custom preset saved locally with its font, colours, grouping, and animation choices.",
+      fontSize,
+      wordsPerGroup,
+      bounceScale,
+      yOffset,
+      baseColor,
+      highlightColor,
+      strokeWidth: currentPreset.strokeWidth ?? 0,
+      strokeColor: currentPreset.strokeColor || "#000000",
+      posIndex: currentPreset.posIndex,
+      reveal: currentPreset.reveal ?? true,
+      highlight: currentPreset.highlight ?? true,
+      pop: bounceScale > 0,
+      shadow: currentPreset.shadow ?? true,
+      font: effectiveFont,
+      animMode: currentPreset.animMode,
+      motionOverride,
+      previewBgGradient: "from-surface-container via-surface-container to-transparent",
+      accentBadge: "bg-primary text-on-primary",
+      previewStyleClass: currentPreset.previewStyleClass || "preset-anim-center-jump",
+    };
+
+    const nextPresets = [...customPresets, preset];
+    try {
+      persistCustomPresets(nextPresets);
+      setCustomPresets(nextPresets);
+      setSelectedPresetId(id);
+      setFontOverride(effectiveFont);
+      saveFontOverride(effectiveFont);
+      showToast({
+        title: "Custom preset saved",
+        description: `"${name}" is saved on this machine and is available in the preset library.`,
+        variant: "success",
+      });
+    } catch (error: any) {
+      showToast({
+        title: "Could not save preset",
+        description: error?.message || "Local preset storage is unavailable.",
+        variant: "error",
+      });
+    }
+  };
+
+  const handleDeleteCustomPreset = (id: string) => {
+    const preset = customPresets.find((item) => item.id === id);
+    if (!preset) return;
+    if (!window.confirm(`Delete the custom preset "${preset.name}"? This cannot be undone.`)) return;
+
+    const nextPresets = customPresets.filter((item) => item.id !== id);
+    try {
+      persistCustomPresets(nextPresets);
+      setCustomPresets(nextPresets);
+      if (selectedPresetId === id) applyPreset(VIRAL_PRESETS[0]);
+      showToast({
+        title: "Custom preset deleted",
+        description: `"${preset.name}" was removed from this machine.`,
+        variant: "success",
+      });
+    } catch (error: any) {
+      showToast({
+        title: "Could not delete preset",
+        description: error?.message || "Local preset storage is unavailable.",
+        variant: "error",
+      });
+    }
   };
 
   // Add tag to Glossary
@@ -269,7 +468,6 @@ export const AppContent = () => {
       return;
     }
 
-    releaseTranscriptAudio();
     setIsTranscribing(true);
     const job = transcribeSelection(
       info,
@@ -279,12 +477,24 @@ export const AppContent = () => {
     jobRef.current = job;
     try {
       const { transcript, audioPath, isTempAudio } = await job.promise;
+      if (!transcript.words.length) {
+        if (audioPath && isTempAudio) removeTempFile(audioPath);
+        throw new Error("Groq returned no words for this audio.");
+      }
+
+      const previousAudio = transcriptAudio.current;
+      if (previousAudio.path && previousAudio.isTemp && previousAudio.path !== audioPath) {
+        removeTempFile(previousAudio.path);
+      }
       transcriptAudio.current = { path: audioPath, isTemp: isTempAudio };
-      if (!transcript.words.length) throw new Error("Groq returned no words for this audio.");
       transcribedLayer.current = info;
       setActiveWords(transcript.words);
+      setTranscriptLanguage(transcript.language || "");
+      setTranscriptRevision((revision) => revision + 1);
       setActiveWordIndex(0);
+      setScrubberPos(0);
       setHasTranscript(true);
+      setIsTranscriptEdited(false);
       setTranscribeStatus(`Done: ${transcript.words.length} words.`);
       showToast({
         title: "Transcription Complete",
@@ -316,7 +526,9 @@ export const AppContent = () => {
 
     setIsBuilding(true);
     try {
-      const words = autoSnapOnsets
+      // Manual timing corrections are authoritative. Automatic onset refinement is applied only
+      // to untouched transcription results, never over the user's edits.
+      const words = autoSnapOnsets && !isTranscriptEdited
         ? await refineWordTiming(activeWords, transcriptAudio.current.path)
         : activeWords;
 
@@ -343,7 +555,7 @@ export const AppContent = () => {
         flickerGapSeconds: DEFAULT_GROUPING_OPTIONS.flickerGapSeconds,
         fps: info.compFrameRate,
         compDuration: info.compDuration,
-        uppercase: true,
+        uppercase: !isArabicLanguage(language || transcriptLanguage),
       });
       if (!groups.length) throw new Error("No words fall inside the layer's in/out range.");
 
@@ -369,7 +581,7 @@ export const AppContent = () => {
       const result = (await evalTS("buildCaptions", info.compId, groups, style)) as BuildCaptionsResult;
       showToast({
         title: "Built in After Effects",
-        description: `${result.captions} captions, ${result.words} words, in "${result.precompName}".`,
+        description: `${result.captions} captions, ${result.words} words, in "${result.precompName}".${isTranscriptEdited && autoSnapOnsets ? " Manual edits were preserved; auto-snap was skipped." : ""}`,
         variant: "success",
       });
     } catch (err: any) {
@@ -379,12 +591,17 @@ export const AppContent = () => {
     }
   };
 
-  // Format timecode
-  const currentTimeSec = ((scrubberPos / 100) * compDuration).toFixed(1);
-  const timecodeDisplay = `00:${currentTimeSec.padStart(4, "0")} / 00:${compDuration.toFixed(1)}`;
+  // Display elapsed time against the selected composition duration.
+  const formatTimelineSeconds = (seconds: number): string => {
+    const safe = Math.max(0, seconds);
+    const minutes = Math.floor(safe / 60);
+    const remainder = (safe % 60).toFixed(1).padStart(4, "0");
+    return `${String(minutes).padStart(2, "0")}:${remainder}`;
+  };
+  const timecodeDisplay = `${formatTimelineSeconds((scrubberPos / 100) * previewDuration)} / ${formatTimelineSeconds(previewDuration)}`;
 
   // Filtered presets for in-tab library
-  const tabFilteredPresets = VIRAL_PRESETS.filter((p) => {
+  const tabFilteredPresets = availablePresets.filter((p) => {
     const matchesCat = libraryFilter === "All" || p.category === libraryFilter;
     const matchesSearch =
       librarySearch.trim() === "" ||
@@ -393,6 +610,86 @@ export const AppContent = () => {
       p.description.toLowerCase().includes(librarySearch.toLowerCase());
     return matchesCat && matchesSearch;
   });
+
+  const seekToWord = (requestedIndex: number) => {
+    if (!activeWords.length) return;
+    const index = Math.max(0, Math.min(activeWords.length - 1, requestedIndex));
+    const word = activeWords[index];
+    setActiveWordIndex(index);
+    setIsPlaying(false);
+    const info = transcribedLayer.current;
+    const targetTime = info
+      ? info.startTime + (info.sourceInSeconds + word.start) * (info.stretchPercent / 100)
+      : word.start;
+    const duration = info?.compDuration && info.compDuration > 0 ? info.compDuration : previewDuration;
+    setScrubberPos(Math.max(0, Math.min(100, (targetTime / duration) * 100)));
+  };
+
+  const handleExport = async (format: "srt" | "vtt" | "json") => {
+    const info = transcribedLayer.current;
+    if (!hasTranscript || !info) {
+      showToast({
+        title: "Nothing to export",
+        description: "Transcribe a layer first so the export has a source and valid timing.",
+        variant: "error",
+      });
+      return;
+    }
+    try {
+      let contents: string;
+      if (format === "json") {
+        contents = JSON.stringify({
+          formatVersion: 1,
+          sourceLayer: info.layerName,
+          composition: info.compName,
+          language: language || transcriptLanguage || "auto",
+          timebase: "audio-relative-seconds",
+          words: activeWords,
+        }, null, 2) + "\n";
+      } else {
+        const synced = syncWords(
+          activeWords,
+          {
+            mapping: {
+              startTime: info.startTime,
+              sourceOffset: info.sourceInSeconds,
+              stretchPercent: info.stretchPercent,
+            },
+            inPoint: info.inPoint,
+            outPoint: info.outPoint,
+          },
+          { fps: info.compFrameRate, offsetFrames: 0 }
+        );
+        const groups = buildGroups(synced, {
+          maxWords: wordsPerGroup,
+          maxCharsPerLine: DEFAULT_GROUPING_OPTIONS.maxCharsPerLine,
+          maxLines: DEFAULT_GROUPING_OPTIONS.maxLines,
+          pauseBreakSeconds: splitOnPauses ? DEFAULT_GROUPING_OPTIONS.pauseBreakSeconds : 999,
+          holdSeconds: DEFAULT_GROUPING_OPTIONS.holdSeconds,
+          flickerGapSeconds: DEFAULT_GROUPING_OPTIONS.flickerGapSeconds,
+          fps: info.compFrameRate,
+          compDuration: info.compDuration,
+          uppercase: false,
+        });
+        contents = formatSubtitles(groups, format as SubtitleFormat);
+      }
+
+      const destination = await evalTS("pickExportPath", format);
+      if (!destination) return;
+      writeExportFile(destination, contents);
+      showToast({
+        title: "Export complete",
+        description: `Saved ${format.toUpperCase()} to ${destination}`,
+        variant: "success",
+      });
+    } catch (err: any) {
+      showToast({
+        title: "Export failed",
+        description: err?.message || String(err),
+        variant: "error",
+      });
+    }
+  };
 
   return (
     <div className="bg-surface text-on-surface flex flex-col min-h-screen selection:bg-primary selection:text-on-primary">
@@ -518,17 +815,27 @@ export const AppContent = () => {
                       Animation Presets Library
                     </h2>
                     <p className="font-label-xs text-label-xs text-on-surface-variant">
-                      {VIRAL_PRESETS.length} Zero-Delay, Frame-Quantized After Effects Motion Styles
+                      {availablePresets.length} Presets • {customPresets.length} Saved Custom
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setCurrentTab("transcribe")}
-                  className="px-space-sm py-1 bg-surface-container-high hover:bg-surface-variant rounded text-on-surface font-label-xs text-label-xs flex items-center gap-1 transition-colors cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[14px]">visibility</span>
-                  <span>View in Canvas</span>
-                </button>
+                <div className="flex items-center gap-space-xs">
+                  <button
+                    onClick={handleSaveCustomPreset}
+                    className="px-space-sm py-1 bg-primary-container/70 hover:bg-primary-container rounded text-on-primary-container font-label-xs text-label-xs flex items-center gap-1 transition-colors cursor-pointer"
+                    title="Save the current font, colours, grouping, and animation settings as a custom preset"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">bookmark_add</span>
+                    <span>Save Current</span>
+                  </button>
+                  <button
+                    onClick={() => setCurrentTab("transcribe")}
+                    className="px-space-sm py-1 bg-surface-container-high hover:bg-surface-variant rounded text-on-surface font-label-xs text-label-xs flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">visibility</span>
+                    <span>View in Canvas</span>
+                  </button>
+                </div>
               </div>
 
               {/* Filter & Search Bar */}
@@ -581,6 +888,7 @@ export const AppContent = () => {
               <div className="grid grid-cols-1 gap-space-sm pt-space-xs max-h-[65vh] overflow-y-auto pr-1">
                 {tabFilteredPresets.map((preset) => {
                   const isSelected = selectedPresetId === preset.id;
+                  const renderSupport = getPresetRenderSupport(preset.animMode);
                   return (
                     <div
                       key={preset.id}
@@ -609,6 +917,12 @@ export const AppContent = () => {
                           <p className="font-body-sm text-body-sm text-on-surface-variant mt-0.5 text-[11px] leading-tight">
                             {preset.whatItLooksLike} • {preset.description}
                           </p>
+                          <span
+                            title={renderSupport.description}
+                            className={`mt-1 self-start font-label-xs text-[8px] px-1.5 py-0.5 rounded font-mono ${renderSupport.level === "native-shape" ? "bg-secondary/15 text-secondary" : renderSupport.level === "native-motion" ? "bg-primary/15 text-primary" : "bg-error/10 text-error"}`}
+                          >
+                            {renderSupport.label}
+                          </span>
                         </div>
 
                         <div className="shrink-0 flex items-center justify-end">
@@ -628,6 +942,20 @@ export const AppContent = () => {
                             </span>
                             <span>{isSelected ? "Active" : "Apply"}</span>
                           </button>
+                          {preset.id.startsWith("custom-") && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleDeleteCustomPreset(preset.id);
+                              }}
+                              className="h-6 px-2 rounded bg-error/15 hover:bg-error/25 text-error font-label-xs text-label-xs cursor-pointer"
+                              title={`Delete custom preset ${preset.name}`}
+                              aria-label={`Delete custom preset ${preset.name}`}
+                            >
+                              Remove
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -703,40 +1031,41 @@ export const AppContent = () => {
                   </span>
                 </div>
 
-                {/* Speech Onset Flags / Markers */}
-                <div className="absolute top-0 bottom-0 left-[12%] w-[1px] bg-tertiary-container/60 pointer-events-none">
-                  <span className="absolute top-0 -left-1 w-2 h-1.5 bg-tertiary-container rounded-b-xs"></span>
-                </div>
-                <div className="absolute top-0 bottom-0 left-[34%] w-[1px] bg-primary/70 pointer-events-none">
-                  <span className="absolute top-0 -left-1 w-2 h-1.5 bg-primary rounded-b-xs"></span>
-                </div>
-                <div className="absolute top-0 bottom-0 left-[58%] w-[1px] bg-primary/70 pointer-events-none">
-                  <span className="absolute top-0 -left-1 w-2 h-1.5 bg-primary rounded-b-xs"></span>
-                </div>
-                <div className="absolute top-0 bottom-0 left-[76%] w-[1px] bg-tertiary-container/60 pointer-events-none">
-                  <span className="absolute top-0 -left-1 w-2 h-1.5 bg-tertiary-container rounded-b-xs"></span>
-                </div>
+                {/* Word markers are derived from the current transcript, not hard-coded placeholders. */}
+                {hasTranscript && activeWords.filter((_word, index) => index % 5 === 0).map((word, markerIndex) => {
+                  const info = transcribedLayer.current;
+                  const time = info
+                    ? info.startTime + (info.sourceInSeconds + word.start) * (info.stretchPercent / 100)
+                    : word.start;
+                  const position = Math.max(0, Math.min(100, (time / previewDuration) * 100));
+                  return (
+                    <div
+                      key={`word-marker-${markerIndex}-${word.start}`}
+                      className="absolute top-0 bottom-0 w-px bg-primary/40 pointer-events-none"
+                      style={{ left: `${position}%` }}
+                    />
+                  );
+                })}
 
-                {/* Generative Multi-Layer Audio Waveform */}
-                <div className="w-full h-10 flex items-end justify-between gap-[1px] px-0.5 z-0 opacity-90">
-                  {[
-                    18, 28, 64, 92, 80, 54, 22, 15, 72, 100, 85, 68, 30, 18, 48, 94, 76, 45, 20, 65, 88, 60, 25, 14, 70, 96, 75, 40, 22, 12,
-                  ].map((height, idx) => {
+                {/* Real waveform peaks computed from the selected source audio. */}
+                <div
+                  className="absolute bottom-1 h-10 flex items-end justify-between gap-[1px] px-0.5 z-0 opacity-90 overflow-hidden"
+                  style={{ left: `${waveformClipLeft}%`, width: `${waveformClipWidth}%` }}
+                >
+                  {waveformHeights && waveformHeights.length ? waveformHeights.map((height, idx) => {
                     const isHigh = height > 60;
                     return (
                       <span
                         key={idx}
-                        className={`w-[2px] rounded-t-xs transition-all ${
-                          isHigh
-                            ? "bg-primary shadow-[0_0_6px_#c0c1ff]"
-                            : height > 35
-                            ? "bg-primary-container"
-                            : "bg-outline-variant"
-                        }`}
+                        className={`flex-1 min-w-[1px] rounded-t-xs transition-colors ${isHigh ? "bg-primary shadow-[0_0_6px_#c0c1ff]" : height > 30 ? "bg-primary-container" : "bg-outline-variant"}`}
                         style={{ height: `${height}%` }}
                       />
                     );
-                  })}
+                  }) : (
+                    <span className="w-full text-center text-[9px] text-on-surface-variant font-mono">
+                      {waveformStatus}
+                    </span>
+                  )}
                 </div>
 
                 {/* Playhead & Scrubber Cursor */}
@@ -855,6 +1184,52 @@ export const AppContent = () => {
               </div>
             </section>
 
+            {/* EDITABLE TRANSCRIPT */}
+            <section className="flex flex-col bg-surface-container rounded-lg p-space-sm shadow-sm gap-space-xs select-text">
+              <div className="flex items-center justify-between gap-space-sm flex-wrap">
+                <div className="flex items-center gap-space-xs">
+                  <span className="material-symbols-outlined text-[14px] text-secondary">edit_note</span>
+                  <span className="font-headline-xs text-headline-xs text-on-surface font-semibold">Transcript editor</span>
+                  <span className="font-label-xs text-label-xs text-on-surface-variant">
+                    {hasTranscript ? `${activeWords.length} words` : "Waiting for transcription"}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(["srt", "vtt", "json"] as const).map((format) => (
+                    <button
+                      key={format}
+                      type="button"
+                      onClick={() => handleExport(format)}
+                      disabled={!hasTranscript || isTranscribing || isBuilding}
+                      className="h-7 px-2 rounded bg-surface-container-high hover:bg-surface-variant text-on-surface text-[10px] font-semibold disabled:opacity-40"
+                      title={`Export current edited transcript as ${format.toUpperCase()}`}
+                    >
+                      Export {format.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <p className="font-label-xs text-label-xs text-on-surface-variant">
+                Click a word to correct its text or timing, remove an unwanted word, or insert a missing word. Edits are used for both After Effects generation and exports.
+              </p>
+              <TranscriptEditor
+                key={transcriptRevision}
+                words={hasTranscript ? activeWords : []}
+                activeWordIndex={activeWordIndex}
+                disabled={isTranscribing || isBuilding}
+                onSelectWord={seekToWord}
+                onChange={(words, focusIndex) => {
+                  setActiveWords(words);
+                  setHasTranscript(words.length > 0);
+                  setIsTranscriptEdited(true);
+                  setActiveWordIndex((index) => {
+                    const preferred = focusIndex === undefined ? index : focusIndex;
+                    return Math.max(0, Math.min(preferred, Math.max(0, words.length - 1)));
+                  });
+                }}
+              />
+            </section>
+
             {/* LIVE PREVIEW CANVAS (CENTERPIECE) */}
             <section className="flex flex-col bg-surface-container rounded-lg p-space-sm shadow-sm gap-space-xs">
               {/* Viewport Header Toolbar */}
@@ -885,7 +1260,7 @@ export const AppContent = () => {
               <div
                 className={`relative w-full ${
                   aspectRatio === "9:16"
-                    ? "aspect-[4/5]"
+                    ? "aspect-[9/16]"
                     : aspectRatio === "16:9"
                     ? "aspect-[16/9]"
                     : "aspect-square"
@@ -1350,7 +1725,7 @@ export const AppContent = () => {
                   {/* Step Back / Play / Step Forward */}
                   <div className="flex items-center gap-space-xs">
                     <button
-                      onClick={() => setActiveWordIndex((prev) => (prev > 0 ? prev - 1 : activeWords.length - 1))}
+                      onClick={() => seekToWord(activeWordIndex > 0 ? activeWordIndex - 1 : activeWords.length - 1)}
                       className="w-6 h-6 flex items-center justify-center rounded bg-surface-container-high text-on-surface hover:text-primary transition-colors cursor-pointer"
                       title="Previous Word"
                     >
@@ -1366,7 +1741,7 @@ export const AppContent = () => {
                       </span>
                     </button>
                     <button
-                      onClick={() => setActiveWordIndex((prev) => (prev + 1) % activeWords.length)}
+                      onClick={() => seekToWord((activeWordIndex + 1) % activeWords.length)}
                       className="w-6 h-6 flex items-center justify-center rounded bg-surface-container-high text-on-surface hover:text-primary transition-colors cursor-pointer"
                       title="Next Word"
                     >
@@ -1411,21 +1786,21 @@ export const AppContent = () => {
                 <div className="flex items-center gap-space-xs">
                   <span className="material-symbols-outlined text-[14px] text-secondary">auto_awesome_motion</span>
                   <span className="font-headline-xs text-headline-xs text-on-surface font-semibold">
-                    Viral Animation Presets ({VIRAL_PRESETS.length})
+                    Viral Animation Presets ({availablePresets.length})
                   </span>
                 </div>
                 <button
                   onClick={() => setIsLibraryOpen(true)}
                   className="font-label-xs text-label-xs text-primary hover:underline flex items-center gap-0.5 cursor-pointer font-semibold"
                 >
-                  Browse Library ({VIRAL_PRESETS.length}){" "}
+                  Browse Library ({availablePresets.length}){" "}
                   <span className="material-symbols-outlined text-[12px]">open_in_new</span>
                 </button>
               </div>
 
               {/* Horizontal Scrollable Preset Cards Tray */}
               <div className="flex items-center gap-space-sm overflow-x-auto pb-space-xs pt-1 no-scrollbar">
-                {VIRAL_PRESETS.map((preset) => {
+                {availablePresets.map((preset) => {
                   const isSelected = selectedPresetId === preset.id;
                   return (
                     <div
@@ -1674,6 +2049,11 @@ export const AppContent = () => {
                     <div className="w-7 h-4 bg-surface-variant peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-on-primary after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-primary"></div>
                   </div>
                 </label>
+                {isTranscriptEdited && autoSnapOnsets && (
+                  <p className="px-space-sm text-[10px] text-on-surface-variant">
+                    Auto-snap will be skipped for this edited transcript so your manual word timings stay intact.
+                  </p>
+                )}
 
                 <label className="flex items-center justify-between bg-surface-container-lowest px-space-sm py-1.5 rounded cursor-pointer group">
                   <div className="flex items-center gap-space-xs min-w-0">
@@ -1730,6 +2110,7 @@ export const AppContent = () => {
         isOpen={isLibraryOpen}
         onClose={() => setIsLibraryOpen(false)}
         activePresetId={selectedPresetId}
+        presets={availablePresets}
         onSelectPreset={(preset) => {
           applyPreset(preset);
           setIsLibraryOpen(false);

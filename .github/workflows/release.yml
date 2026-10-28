@@ -4,15 +4,22 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to build for, e.g. v1.1.0 (created from this commit if it does not exist)'
+        description: 'Release tag to build for, e.g. v1.3.0 (must match package.json version)'
         required: true
+
+# A version branch and its generated tag share the same name. Serialize them so the tag-triggered
+# follow-up can see the release created by the branch-triggered run.
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   build-zxp:
-    # Adobe's ZXPSignCmd (bundled by vite-cep-plugin) only ships for Windows and macOS.
     runs-on: windows-latest
     permissions:
       contents: write
@@ -24,36 +31,73 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Avoid duplicate tag-triggered release after a version-branch publish
+        id: release_guard
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == refs/tags/* ]]; then
+            status="$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG")"
+            if [[ "$status" == "200" ]]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "The release already exists; skipping the duplicate tag-triggered run."
+            fi
+          fi
+
+      - name: Set up Node.js
+        if: steps.release_guard.outputs.skip != 'true'
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
-      - run: npm ci
+      - name: Install locked dependencies
+        if: steps.release_guard.outputs.skip != 'true'
+        run: npm ci
 
-      - run: npm test
+      - name: Run unit tests
+        if: steps.release_guard.outputs.skip != 'true'
+        run: npm test
 
-      # A fresh self-signed certificate is generated on every build, so its password is a
-      # throwaway value rather than a stored secret.
+      - name: Type-check panel and host code
+        if: steps.release_guard.outputs.skip != 'true'
+        run: npm run typecheck
+
+      - name: Run lint/type check
+        if: steps.release_guard.outputs.skip != 'true'
+        run: npm run lint
+
       - name: Build signed ZXP
+        if: steps.release_guard.outputs.skip != 'true'
         run: |
           export ZXP_PASSWORD="$(openssl rand -hex 24)"
           npm run zxp
 
-      - name: Verify signature and rename
+      - name: Verify signature, package version, and rename
+        if: steps.release_guard.outputs.skip != 'true'
         run: |
           src="$(ls dist/zxp/*.zxp | head -n 1)"
           node_modules/vite-cep-plugin/lib/bin/ZXPSignCmd.exe -verify "$src"
           version="$(node -p "require('./package.json').version")"
+          expected_version="${TAG#v}"
+          if [[ "$version" != "$expected_version" ]]; then
+            echo "Tag $TAG does not match package.json version $version."
+            exit 1
+          fi
           mkdir -p out
           cp "$src" "out/Pro-Caption-AE_${version}.zxp"
           ls -l out
 
       - name: Attach to release
+        if: steps.release_guard.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG }}
-          # Only used when the tag doesn't exist yet (manual run for a new version).
           target_commitish: ${{ github.sha }}
           name: Pro Caption AE ${{ env.TAG }}
           body_path: .github/release-notes.md
