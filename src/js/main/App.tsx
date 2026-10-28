@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { evalTS } from "../lib/utils/bolt";
 import { resolveApiKey } from "../lib/services/apiKey";
 import { extractWaveformPeaks, findFfmpeg, removeTempFile } from "../lib/services/ffmpeg";
@@ -37,6 +37,7 @@ import { FontPicker } from "./features/FontPicker";
 import { PresetLibraryModal } from "./features/PresetLibraryModal";
 import { TranscriptEditor } from "./features/TranscriptEditor";
 import { writeExportFile } from "../lib/services/export";
+import { loadCustomPresets, persistCustomPresets } from "../lib/services/customPresets";
 import { syncWords } from "../../shared/sync";
 import { buildGroups } from "../../shared/captions";
 import { formatSubtitles, type SubtitleFormat } from "../../shared/subtitles";
@@ -58,6 +59,8 @@ export const AppContent = () => {
   const { show: showToast } = useToast();
   const [currentTab, setCurrentTab] = useState<Tab>("transcribe");
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [customPresets, setCustomPresets] = useState<ViralPreset[]>(() => loadCustomPresets());
+  const availablePresets = useMemo(() => [...VIRAL_PRESETS, ...customPresets], [customPresets]);
 
   // Selection info
   const [selection, setSelection] = useState<SelectedAudioLayerInfo | null>(null);
@@ -126,7 +129,7 @@ export const AppContent = () => {
   const [isBuilding, setIsBuilding] = useState(false);
 
   // Current active preset object
-  const currentPreset = VIRAL_PRESETS.find((p) => p.id === selectedPresetId) || VIRAL_PRESETS[0];
+  const currentPreset = availablePresets.find((p) => p.id === selectedPresetId) || VIRAL_PRESETS[0];
 
   // null = use the preset's own motion. Kinetic Motion presets and any override preview the
   // exact motion After Effects will build; classic presets keep their bespoke preview looks.
@@ -281,7 +284,11 @@ export const AppContent = () => {
   // Handle Preset selection
   const applyPreset = (preset: ViralPreset) => {
     setSelectedPresetId(preset.id);
-    setMotionOverride(null);
+    setMotionOverride(preset.motionOverride ?? null);
+    if (preset.id.startsWith("custom-")) {
+      setFontOverride(preset.font);
+      saveFontOverride(preset.font);
+    }
     setFontSize(preset.fontSize);
     setWordsPerGroup(preset.wordsPerGroup);
     setBounceScale(preset.bounceScale);
@@ -297,8 +304,102 @@ export const AppContent = () => {
   };
 
   const handleSelectPresetById = (id: string) => {
-    const p = VIRAL_PRESETS.find((item) => item.id === id);
+    const p = availablePresets.find((item) => item.id === id);
     if (p) applyPreset(p);
+  };
+
+  const handleSaveCustomPreset = () => {
+    if (customPresets.length >= 100) {
+      showToast({
+        title: "Custom preset limit reached",
+        description: "This release supports up to 100 saved custom presets. Delete one before saving another.",
+        variant: "error",
+      });
+      return;
+    }
+
+    const enteredName = window.prompt("Name this custom preset", currentPreset.name + " Custom");
+    if (enteredName === null) return;
+    const name = enteredName.replace(/^\s+|\s+$/g, "").slice(0, 80);
+    if (!name) {
+      showToast({ title: "Preset name required", description: "Enter a name before saving.", variant: "error" });
+      return;
+    }
+
+    const id = "custom-" + Date.now().toString(36);
+    const preset: ViralPreset = {
+      ...currentPreset,
+      id,
+      num: 1000 + customPresets.length,
+      name,
+      category: "Kinetic Motion",
+      tag: "CUSTOM",
+      whatItLooksLike: "Saved custom typography and animation settings",
+      description: "Custom preset saved locally with its font, colours, grouping, and animation choices.",
+      fontSize,
+      wordsPerGroup,
+      bounceScale,
+      yOffset,
+      baseColor,
+      highlightColor,
+      strokeWidth: currentPreset.strokeWidth ?? 0,
+      strokeColor: currentPreset.strokeColor || "#000000",
+      posIndex: currentPreset.posIndex,
+      reveal: currentPreset.reveal ?? true,
+      highlight: currentPreset.highlight ?? true,
+      pop: bounceScale > 0,
+      shadow: currentPreset.shadow ?? true,
+      font: effectiveFont,
+      animMode: currentPreset.animMode,
+      motionOverride,
+      previewBgGradient: "from-surface-container via-surface-container to-transparent",
+      accentBadge: "bg-primary text-on-primary",
+      previewStyleClass: currentPreset.previewStyleClass || "preset-anim-center-jump",
+    };
+
+    const nextPresets = [...customPresets, preset];
+    try {
+      persistCustomPresets(nextPresets);
+      setCustomPresets(nextPresets);
+      setSelectedPresetId(id);
+      setFontOverride(effectiveFont);
+      saveFontOverride(effectiveFont);
+      showToast({
+        title: "Custom preset saved",
+        description: `"${name}" is saved on this machine and is available in the preset library.`,
+        variant: "success",
+      });
+    } catch (error: any) {
+      showToast({
+        title: "Could not save preset",
+        description: error?.message || "Local preset storage is unavailable.",
+        variant: "error",
+      });
+    }
+  };
+
+  const handleDeleteCustomPreset = (id: string) => {
+    const preset = customPresets.find((item) => item.id === id);
+    if (!preset) return;
+    if (!window.confirm(`Delete the custom preset "${preset.name}"? This cannot be undone.`)) return;
+
+    const nextPresets = customPresets.filter((item) => item.id !== id);
+    try {
+      persistCustomPresets(nextPresets);
+      setCustomPresets(nextPresets);
+      if (selectedPresetId === id) applyPreset(VIRAL_PRESETS[0]);
+      showToast({
+        title: "Custom preset deleted",
+        description: `"${preset.name}" was removed from this machine.`,
+        variant: "success",
+      });
+    } catch (error: any) {
+      showToast({
+        title: "Could not delete preset",
+        description: error?.message || "Local preset storage is unavailable.",
+        variant: "error",
+      });
+    }
   };
 
   // Add tag to Glossary
@@ -487,7 +588,7 @@ export const AppContent = () => {
   const timecodeDisplay = `${formatTimelineSeconds((scrubberPos / 100) * previewDuration)} / ${formatTimelineSeconds(previewDuration)}`;
 
   // Filtered presets for in-tab library
-  const tabFilteredPresets = VIRAL_PRESETS.filter((p) => {
+  const tabFilteredPresets = availablePresets.filter((p) => {
     const matchesCat = libraryFilter === "All" || p.category === libraryFilter;
     const matchesSearch =
       librarySearch.trim() === "" ||
@@ -701,17 +802,27 @@ export const AppContent = () => {
                       Animation Presets Library
                     </h2>
                     <p className="font-label-xs text-label-xs text-on-surface-variant">
-                      {VIRAL_PRESETS.length} Zero-Delay, Frame-Quantized After Effects Motion Styles
+                      {availablePresets.length} Presets • {customPresets.length} Saved Custom
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setCurrentTab("transcribe")}
-                  className="px-space-sm py-1 bg-surface-container-high hover:bg-surface-variant rounded text-on-surface font-label-xs text-label-xs flex items-center gap-1 transition-colors cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[14px]">visibility</span>
-                  <span>View in Canvas</span>
-                </button>
+                <div className="flex items-center gap-space-xs">
+                  <button
+                    onClick={handleSaveCustomPreset}
+                    className="px-space-sm py-1 bg-primary-container/70 hover:bg-primary-container rounded text-on-primary-container font-label-xs text-label-xs flex items-center gap-1 transition-colors cursor-pointer"
+                    title="Save the current font, colours, grouping, and animation settings as a custom preset"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">bookmark_add</span>
+                    <span>Save Current</span>
+                  </button>
+                  <button
+                    onClick={() => setCurrentTab("transcribe")}
+                    className="px-space-sm py-1 bg-surface-container-high hover:bg-surface-variant rounded text-on-surface font-label-xs text-label-xs flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">visibility</span>
+                    <span>View in Canvas</span>
+                  </button>
+                </div>
               </div>
 
               {/* Filter & Search Bar */}
@@ -811,6 +922,20 @@ export const AppContent = () => {
                             </span>
                             <span>{isSelected ? "Active" : "Apply"}</span>
                           </button>
+                          {preset.id.startsWith("custom-") && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleDeleteCustomPreset(preset.id);
+                              }}
+                              className="h-6 px-2 rounded bg-error/15 hover:bg-error/25 text-error font-label-xs text-label-xs cursor-pointer"
+                              title={`Delete custom preset ${preset.name}`}
+                              aria-label={`Delete custom preset ${preset.name}`}
+                            >
+                              Remove
+                            </button>
+                          )}
                         </div>
                       </div>
 
@@ -1634,21 +1759,21 @@ export const AppContent = () => {
                 <div className="flex items-center gap-space-xs">
                   <span className="material-symbols-outlined text-[14px] text-secondary">auto_awesome_motion</span>
                   <span className="font-headline-xs text-headline-xs text-on-surface font-semibold">
-                    Viral Animation Presets ({VIRAL_PRESETS.length})
+                    Viral Animation Presets ({availablePresets.length})
                   </span>
                 </div>
                 <button
                   onClick={() => setIsLibraryOpen(true)}
                   className="font-label-xs text-label-xs text-primary hover:underline flex items-center gap-0.5 cursor-pointer font-semibold"
                 >
-                  Browse Library ({VIRAL_PRESETS.length}){" "}
+                  Browse Library ({availablePresets.length}){" "}
                   <span className="material-symbols-outlined text-[12px]">open_in_new</span>
                 </button>
               </div>
 
               {/* Horizontal Scrollable Preset Cards Tray */}
               <div className="flex items-center gap-space-sm overflow-x-auto pb-space-xs pt-1 no-scrollbar">
-                {VIRAL_PRESETS.map((preset) => {
+                {availablePresets.map((preset) => {
                   const isSelected = selectedPresetId === preset.id;
                   return (
                     <div
@@ -1958,6 +2083,7 @@ export const AppContent = () => {
         isOpen={isLibraryOpen}
         onClose={() => setIsLibraryOpen(false)}
         activePresetId={selectedPresetId}
+        presets={availablePresets}
         onSelectPreset={(preset) => {
           applyPreset(preset);
           setIsLibraryOpen(false);
