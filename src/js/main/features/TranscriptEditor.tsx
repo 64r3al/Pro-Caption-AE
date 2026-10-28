@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, FileText, Plus, Trash2, X } from "lucide-react";
 import { EmptyState } from "../ui/EmptyState";
 import type { TranscriptWord } from "../../../shared/types";
@@ -54,6 +54,16 @@ export const TranscriptEditor = ({
   const [draftEnd, setDraftEnd] = useState("");
   const [newWordText, setNewWordText] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (selectedIndex !== null && selectedIndex >= words.length) {
+      setSelectedIndex(null);
+      setDraftText("");
+      setDraftStart("");
+      setDraftEnd("");
+      setError(null);
+    }
+  }, [selectedIndex, words.length]);
 
   const selectWord = (index: number) => {
     const word = words[index];
