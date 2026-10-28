@@ -39,7 +39,14 @@ Requires After Effects 2024 (v24) or newer and FFmpeg. See [INSTALLATION.md](./I
 - **Your fonts:** the font picker lists every font installed on your machine (After Effects
   2024+), previews each one in its own typeface, and remembers your choice.
 - **Editable output:** normal After Effects text layers driven by expressions.
+- **Transcript correction:** edit word text and timing, insert missing words, or remove unwanted words before building captions.
+- **Real waveform analysis:** waveform peaks come from the selected source audio; click the timeline to seek the preview.
+- **Subtitle export:** save the edited transcript as SRT, WebVTT, or structured JSON.
+- **Custom presets:** save your current style locally, reapply it later, and remove custom presets you no longer need.
+- **Preset support labels:** distinguish presets with native text motion, native shape treatments, or simplified text output.
 - **Bring your own key:** your Groq key is stored encrypted in your user profile, never in the project.
+
+**Important limitations:** the panel's animated preview is representative, not guaranteed to be pixel-identical to After Effects output. The waveform analyzes audio, but full audio playback and a data-driven single-text-layer generator are not part of v1.3.0. Arabic casing is preserved; full right-to-left rendering must be verified in After Effects.
 
 ## Stack
 
