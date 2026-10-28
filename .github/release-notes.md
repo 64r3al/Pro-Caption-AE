@@ -1,3 +1,24 @@
+## Pro Caption AE v1.4.1
+
+Reliability fixes for static previews, transcript recovery, settings, and FFmpeg discovery.
+
+- Static grouped-caption previews no longer apply active-word highlighting or bounce scaling.
+- Saving an After Effects project after transcription now attaches the current transcript to the saved project so later edits can recover.
+- New transcript recovery records include the source media size and reject records when media at the same path changes size. Older records remain readable.
+- FFmpeg PATH discovery is asynchronous, and failures saving API key or FFmpeg settings are shown in the panel.
+- Settings writes use a temporary file followed by an atomic rename to reduce partial-write risk.
+- Automated transcript-recovery tests cover same-path media size changes and legacy records.
+
+### Important limits
+
+- Automated CI does not run Adobe After Effects. Follow the manual acceptance checklist in [docs/ARCHITECTURE.md](https://github.com/64r3al/Pro-Caption-AE/blob/main/docs/ARCHITECTURE.md#v141-manual-acceptance-still-required) before relying on the extension for important work.
+- Legacy recovery records do not contain media-size fingerprints; they are accepted for compatibility and receive the stronger check on their next save.
+- Media with the same path and size cannot be distinguished by this fingerprint alone.
+
+Requires After Effects 2024 (v24) or newer and FFmpeg. See [INSTALLATION.md](https://github.com/64r3al/Pro-Caption-AE/blob/main/INSTALLATION.md) for setup instructions.
+
+---
+
 ## Pro Caption AE v1.4.0
 
 Static caption output, optional stroke removal, and local transcript recovery.

@@ -19,9 +19,11 @@ export const SettingsTab = () => {
   const [status, setStatus] = useState<ApiKeyStatus>({ source: "none", last4: "" });
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [locatingFfmpeg, setLocatingFfmpeg] = useState(false);
   const [ffmpegPath, setFfmpegPath] = useState<string | null>(null);
 
-  const refresh = () => {
+  const refresh = async () => {
     // Node integration (fs/child_process) isn't present in the plain-browser `npm run dev`
     // server - resolveApiKey()/findFfmpeg() throw a clear "Node.js integration isn't
     // available" error there (see lib/services/env.ts#assertNodeAvailable). Inside After
@@ -30,27 +32,37 @@ export const SettingsTab = () => {
     try {
       const { status } = resolveApiKey();
       setStatus(status);
-      setFfmpegPath(findFfmpeg());
+      setFfmpegPath(await findFfmpeg());
     } catch {
       setStatus({ source: "none", last4: "" });
       setFfmpegPath(null);
     }
   };
 
-  useEffect(refresh, []);
+  useEffect(() => { void refresh(); }, []);
 
   const handleSave = () => {
     if (!keyInput.trim()) return;
-    saveApiKey(keyInput.trim());
-    setKeyInput("");
-    setTestResult(null);
-    refresh();
+    setSettingsError(null);
+    try {
+      saveApiKey(keyInput.trim());
+      setKeyInput("");
+      setTestResult(null);
+      void refresh();
+    } catch (err: any) {
+      setSettingsError(err?.message || "Could not save the API key. Check file permissions and try again.");
+    }
   };
 
   const handleClear = () => {
-    clearStoredApiKey();
-    setTestResult(null);
-    refresh();
+    setSettingsError(null);
+    try {
+      clearStoredApiKey();
+      setTestResult(null);
+      void refresh();
+    } catch (err: any) {
+      setSettingsError(err?.message || "Could not clear the saved API key. Try again.");
+    }
   };
 
   const handleTest = async () => {
@@ -76,10 +88,18 @@ export const SettingsTab = () => {
   };
 
   const handleLocateFfmpeg = async () => {
-    const picked = await evalTS("pickFfmpegExecutable");
-    if (picked) {
-      setFfmpegOverride(picked);
-      setFfmpegPath(picked);
+    setSettingsError(null);
+    setLocatingFfmpeg(true);
+    try {
+      const picked = await evalTS("pickFfmpegExecutable");
+      if (picked) {
+        setFfmpegOverride(picked);
+        setFfmpegPath(picked);
+      }
+    } catch (err: any) {
+      setSettingsError(err?.message || "Could not save the FFmpeg location. Check permissions and try again.");
+    } finally {
+      setLocatingFfmpeg(false);
     }
   };
 
@@ -107,6 +127,7 @@ export const SettingsTab = () => {
           </Button>
         </div>
         {testResult && !testResult.ok && <InlineError message={testResult.message} />}
+        {settingsError && <InlineError message={settingsError} />}
         {testResult?.ok && (
           <p className="gc-hint gc-settings-success">
             <Check size={12} /> {testResult.message}
@@ -129,7 +150,7 @@ export const SettingsTab = () => {
             message="Not found. Without ffmpeg, only short clips (≤25 MB, mp3/mp4/wav/m4a/flac/ogg/webm) can be sent directly to Groq."
           />
         )}
-        <Button size="sm" variant="secondary" icon={<FolderSearch size={14} />} onClick={handleLocateFfmpeg}>
+        <Button size="sm" variant="secondary" icon={<FolderSearch size={14} />} onClick={handleLocateFfmpeg} loading={locatingFfmpeg}>
           Locate ffmpeg…
         </Button>
       </section>

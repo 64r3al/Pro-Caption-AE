@@ -44,6 +44,7 @@ export const saveRecoveredTranscript = (
     compId: info.compId,
     layerIndex: info.layerIndex,
     sourceFilePath: info.sourceFilePath,
+    sourceFileSizeBytes: info.sourceFileSizeBytes,
     compName: info.compName,
     layerName: info.layerName,
     language,

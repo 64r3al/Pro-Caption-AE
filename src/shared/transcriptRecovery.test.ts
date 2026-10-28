@@ -34,6 +34,7 @@ const record: TranscriptRecoveryRecord = {
   compId: 1001,
   layerIndex: 2,
   sourceFilePath: "C:/Media/voice.wav",
+  sourceFileSizeBytes: 1000,
   compName: "Main",
   layerName: "Voice",
   language: "en",
@@ -59,6 +60,18 @@ describe("transcript recovery", () => {
     const encoded = serializeTranscriptRecovery(record);
     expect(parseTranscriptRecovery(encoded, { ...layer, projectFilePath: "C:/Projects/other.aep" })).toBeNull();
     expect(parseTranscriptRecovery(encoded, { ...layer, sourceFilePath: "C:/Media/other.wav" })).toBeNull();
+  });
+
+  it("does not restore a transcript when media at the same path has changed size", () => {
+    const encoded = serializeTranscriptRecovery(record);
+    expect(parseTranscriptRecovery(encoded, { ...layer, sourceFileSizeBytes: 1001 })).toBeNull();
+  });
+
+  it("continues to read older records without a media size fingerprint", () => {
+    const legacy = { ...record } as Partial<TranscriptRecoveryRecord>;
+    delete legacy.sourceFileSizeBytes;
+    const restored = parseTranscriptRecovery(serializeTranscriptRecovery(legacy as TranscriptRecoveryRecord), layer);
+    expect(restored?.words).toEqual(record.words);
   });
 
   it("normalizes Windows case but keeps case-distinct POSIX paths separate", () => {

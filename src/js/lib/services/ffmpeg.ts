@@ -18,27 +18,26 @@ const candidatePaths = (): string[] => {
   return ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"];
 };
 
-const which = (): string | null => {
+const which = (): Promise<string | null> => {
   const platform = os.platform();
-  try {
-    const out = child_process
-      .execSync(platform === "win32" ? "where ffmpeg" : "command -v ffmpeg", {
-        encoding: "utf-8",
-        timeout: 5000,
-      })
-      .split(/\r?\n/)[0]
-      .trim();
-    return out && fs.existsSync(out) ? out : null;
-  } catch {
-    return null;
-  }
+  return new Promise((resolve) => {
+    child_process.execFile(
+      platform === "win32" ? "where.exe" : "which",
+      ["ffmpeg"],
+      { encoding: "utf-8", timeout: 5000 },
+      (error: Error | null, stdout: string) => {
+        const out = error ? "" : String(stdout || "").split(/\r?\n/)[0].trim();
+        resolve(out && fs.existsSync(out) ? out : null);
+      }
+    );
+  });
 };
 
 /** Locates an ffmpeg binary: a user override wins, then common per-OS install locations,
  * then falling back to the shell's own PATH lookup. Returns null if nothing was found, in
  * which case the caller should offer the direct-upload path or ask the user to install/locate
  * ffmpeg (see src/jsx/aeft/aeft.ts#pickFfmpegExecutable for the native file-picker). */
-export const findFfmpeg = (): string | null => {
+export const findFfmpeg = async (): Promise<string | null> => {
   assertNodeAvailable();
   const override = getStoredFfmpegPath();
   if (override && fs.existsSync(override)) return override;
@@ -46,7 +45,7 @@ export const findFfmpeg = (): string | null => {
   for (const candidate of candidatePaths()) {
     if (candidate && fs.existsSync(candidate)) return candidate;
   }
-  return which();
+  return await which();
 };
 
 export const setFfmpegOverride = (ffmpegPath: string | null): void => {

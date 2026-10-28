@@ -10,6 +10,8 @@ export interface TranscriptRecoveryRecord {
   compId: number;
   layerIndex: number;
   sourceFilePath: string;
+  /** Optional for compatibility with recovery records created before media fingerprints. */
+  sourceFileSizeBytes?: number;
   compName: string;
   layerName: string;
   language: string;
@@ -42,6 +44,8 @@ const isValidRecord = (value: unknown): value is TranscriptRecoveryRecord => {
   if (typeof record.projectFilePath !== "string" || !record.projectFilePath) return false;
   if (!Number.isInteger(record.compId) || !Number.isInteger(record.layerIndex)) return false;
   if (typeof record.sourceFilePath !== "string" || !record.sourceFilePath) return false;
+  if (record.sourceFileSizeBytes !== undefined &&
+      (!Number.isFinite(record.sourceFileSizeBytes) || record.sourceFileSizeBytes < 0)) return false;
   if (typeof record.compName !== "string" || typeof record.layerName !== "string") return false;
   if (typeof record.language !== "string" || typeof record.edited !== "boolean") return false;
   if (!Number.isFinite(record.updatedAt) || !Array.isArray(record.words)) return false;
@@ -62,6 +66,7 @@ export const parseTranscriptRecovery = (
     if (value.compId !== expected.compId || value.layerIndex !== expected.layerIndex) return null;
     if (normalizeTranscriptRecoveryPath(value.projectFilePath) !== normalizeTranscriptRecoveryPath(expected.projectFilePath || "")) return null;
     if (normalizeTranscriptRecoveryPath(value.sourceFilePath) !== normalizeTranscriptRecoveryPath(expected.sourceFilePath)) return null;
+    if (value.sourceFileSizeBytes !== undefined && value.sourceFileSizeBytes !== expected.sourceFileSizeBytes) return null;
     return { ...value, words: validateTranscriptWords(value.words) };
   } catch {
     return null;
